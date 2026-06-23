@@ -173,8 +173,29 @@ class Simulation:
         self.cadence_mpc = int(orch.get("cadence_mpc_slots", 1))
         self._last_v = np.zeros((self.M, 2))
         self._next_tid = 0  # unique task-id counter (Increment 3 per-task compute)
+        self._task_meta: dict = {}   # tid -> (arrival_t, deadline_s) for completion/latency metrics
+        self.reset_metrics()
 
         self.state = self._init_state(seed)
+
+    # ---- outcome metrics (for directional check / §18.4 table) ---------------
+    def reset_metrics(self) -> None:
+        """Zero the outcome accumulators (call before an evaluation window)."""
+        self.metrics = {
+            "arrived": 0, "completed": 0, "on_time": 0, "latency_sum": 0.0,
+            "energy_consumed_j": 0.0, "util_sum": 0.0, "coverage_sum": 0.0, "slots": 0,
+        }
+
+    def metrics_summary(self) -> dict:
+        """Derived outcomes: completion rate, mean latency, energy, util, coverage."""
+        m = self.metrics
+        return {
+            "completion_rate": m["on_time"] / m["arrived"] if m["arrived"] else 0.0,
+            "mean_latency_s": m["latency_sum"] / m["completed"] if m["completed"] else float("nan"),
+            "energy_consumed_j": m["energy_consumed_j"],
+            "mean_util": m["util_sum"] / m["slots"] if m["slots"] else 0.0,
+            "mean_coverage": m["coverage_sum"] / m["slots"] if m["slots"] else 0.0,
+        }
 
     # ---- initial conditions (spec §14) --------------------------------------
     def _init_state(self, seed) -> SimState:
@@ -199,6 +220,8 @@ class Simulation:
         """Insert a task directly (for tests / controlled scenarios)."""
         self.state.radio_q[device].append(
             Task(device, bits, cycles, deadline_s, priority, self.state.t, bits, tid=self._next_tid))
+        self._task_meta[self._next_tid] = (self.state.t, deadline_s)
+        self.metrics["arrived"] += 1
         self._next_tid += 1
 
     def _offload_state(self, device: int, head: Task) -> np.ndarray:
@@ -368,11 +391,20 @@ class Simulation:
             s.compute_q_cycles[j] = sum(s.compute_items[j].values())   # sync aggregate
 
         # energy update (eq 10): flight (if the UAV actually moved) + compute(executed), harvest
+        slot_energy = 0.0
         for j in range(self.M):
+            slot_energy += float(self.energy.consumed_j(executed[j], 1.0 if moved[j] else 0.0))
             s.uav_energy_j[j] = float(
                 self.energy.step(s.uav_energy_j[j], executed[j], 1.0 if moved[j] else 0.0))
 
         coverage = gaussian_coverage(s.uav_pos, s.device_pos, self.sigma_cov)
+
+        # --- outcome metrics (energy consumed, utilization, coverage) -------
+        cap_slot = float(s.uav_capacity_cps.sum()) * self.dt
+        self.metrics["energy_consumed_j"] += slot_energy
+        self.metrics["util_sum"] += (float(executed.sum()) / cap_slot) if cap_slot > 0 else 0.0
+        self.metrics["coverage_sum"] += coverage
+        self.metrics["slots"] += 1
 
         # --- diagnostics / Lyapunov drift -----------------------------------
         qr_after = sum(task.remaining_bits for q in s.radio_q for task in q)
@@ -409,6 +441,8 @@ class Simulation:
                 d = self.rng.uniform(self.d_lo, self.d_hi)
                 rho = self.rng.integers(self.rho_lo, self.rho_hi + 1)
                 self.state.radio_q[i].append(Task(i, L, W, d, float(rho), t, L, tid=self._next_tid))
+                self._task_meta[self._next_tid] = (t, d)
+                self.metrics["arrived"] += 1
                 self._next_tid += 1
                 added += L
         return added
@@ -472,6 +506,15 @@ class Simulation:
             items[key] -= float(served[k])
             if items[key] <= 1e-6:
                 del items[key]
+                # task finished computing this slot -> record completion/latency
+                meta = self._task_meta.pop(key, None)
+                if meta is not None:
+                    arrival_t, deadline_s = meta
+                    lat = (self.state.t - arrival_t) * self.dt
+                    self.metrics["completed"] += 1
+                    self.metrics["latency_sum"] += lat
+                    if lat <= deadline_s:
+                        self.metrics["on_time"] += 1
         return float(served.sum())
 
     def _apso_split(self, tids, rem, cap) -> np.ndarray:
