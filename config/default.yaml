@@ -117,7 +117,7 @@ apso:
 
 # ---- Lyapunov — two-tier drift-plus-penalty (spec §10; A1) -------------------
 lyapunov:
-  penalty_weight_V: 1.0               # approved [B15]: V = 1.0 (to be swept; small V favors stability)
+  penalty_weight_V: 6.9e+16           # RESCALED 2026-06-23 (§15 entry 37): unit-commensurability — makes V*penalty ~ c_Q*Q^c*a at the lambda=0.2 reference operating point (conditional-active backlog ~3.9e8 cyc). Derived from system scales, NOT tuned to any metric. Was 1.0 (left MORL objective-blind, entries 34/36).
   tier_scaling_c_Q: 6.4e-5            # approved [A1/§10.1]: c_Q = r_bar^-2, r_bar≈125 cyc/bit (representative; balances bits^2 vs cycles^2)
   # r_bar handling: representative mean intensity for the Lyapunov metric ONLY; actual work conversion uses per-task r_{i,k} at the hand-off (§4.7).
 
