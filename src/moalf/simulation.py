@@ -107,11 +107,16 @@ class SimState:
 class Simulation:
     """Algorithm-1 integration skeleton (spec §11)."""
 
-    def __init__(self, config: Mapping[str, Any], *, seed: Optional[int] = None):
+    def __init__(self, config: Mapping[str, Any], *, seed: Optional[int] = None,
+                 offload_policy: str = "morl", lyapunov_biasing: bool = False):
         self.config = config
         if seed is None:
             seed = int(config["run"]["seed"])
         self.rng = np.random.default_rng(seed)
+        # base offload policy ('morl' = untrained DQN greedy; 'nearest' = best channel)
+        # and whether the Lyapunov drift-plus-penalty biasing (Increment 1) is ON.
+        self.offload_policy = offload_policy
+        self.lyapunov_biasing = lyapunov_biasing
 
         # deterministic system-model layer
         self.channel = ChannelModel.from_config(config)
@@ -184,6 +189,48 @@ class Simulation:
         d = (head.deadline_s - self.d_lo) / (self.d_hi - self.d_lo)
         return np.concatenate([c, e, q, [w, d]]).astype(np.float32)
 
+    def _device_intensity(self, i: int) -> float:
+        """Mean work intensity r̄_i = ΣW/ΣL (cycles/bit) of device i's queued tasks."""
+        q = self.state.radio_q[i]
+        tot_bits = sum(tk.remaining_bits for tk in q)
+        tot_cyc = sum(tk.remaining_bits * tk.intensity for tk in q)
+        return tot_cyc / tot_bits if tot_bits > 0 else 0.0
+
+    def _predicted_handoff_cycles(self, i: int, j: int) -> float:
+        """Predicted cycles device i would hand to UAV j this slot (for biasing).
+
+        Approximate (uses pre-arrival backlog and mean intensity); the ACTUAL
+        hand-off is computed exactly per task in the env step, so this prediction
+        affects only the *decision*, never the bit/cycle accounting.
+        """
+        s = self.state
+        gain = self.channel.large_scale_gain(s.uav_pos[j], s.device_pos[i])
+        budget_bits = float(self.channel.rate(gain)) * self.dt
+        avail_bits = sum(tk.remaining_bits for tk in s.radio_q[i])
+        return min(budget_bits, avail_bits) * self._device_intensity(i)
+
+    def _assignment_penalty(self, i: int, j: int) -> float:
+        """Objective penalty (via the 'morl' projection) of serving device i at UAV j.
+
+        Weights come from the Objective (D1); the Lyapunov layer supplies only V/c_Q.
+        """
+        s = self.state
+        a = self._predicted_handoff_cycles(i, j)          # cycles
+        c_j = s.uav_capacity_cps[j]
+        head = max(s.radio_q[i], key=lambda tk: tk.urgency(self.state.t))
+        latency = (s.compute_q_cycles[j] + a) / c_j        # s (approx completion time)
+        exec_e = a * self.computation.energy_per_cycle_j   # J
+        available = s.uav_energy_j[j]
+        completed = (latency <= head.deadline_s) and (available >= exec_e)
+        util = min(1.0, c_j * head.deadline_s / (s.compute_q_cycles[j] + a + 1.0))
+        raw = {
+            Term.TASK: latency,
+            Term.ENERGY: exec_e,
+            Term.COMPLETION: -1.0 if completed else 0.0,
+            Term.UTIL: -util,
+        }
+        return self.proj_morl.value(raw)
+
     def _mpc_evaluate_positions(self, positions: np.ndarray):
         """Raw {task, energy, coverage} for an MPC candidate position set.
 
@@ -202,12 +249,26 @@ class Simulation:
 
         # --- 1. observe (s) ---
 
-        # --- 2. MORL: assign each non-empty device's work to a UAV -----------
-        assignment: dict = {}
-        for i in range(self.N):
-            if s.radio_q[i]:
-                head = max(s.radio_q[i], key=lambda tk: tk.urgency(t))
-                assignment[i] = self.morl.greedy(self._offload_state(i, head))
+        # --- 2. MORL: base offload assignment for each non-empty device ------
+        devices = [i for i in range(self.N) if s.radio_q[i]]
+        base_assignment: dict = {}
+        for i in devices:
+            head = max(s.radio_q[i], key=lambda tk: tk.urgency(t))
+            if self.offload_policy == "nearest":
+                gains = [float(self.channel.large_scale_gain(s.uav_pos[j], s.device_pos[i]))
+                         for j in range(self.M)]
+                base_assignment[i] = int(np.argmax(gains))
+            else:  # "morl": untrained DQN greedy (in-loop training is Increment 2)
+                base_assignment[i] = self.morl.greedy(self._offload_state(i, head))
+
+        # --- 5 (applied here, spec §11): Lyapunov drift-plus-penalty biasing --
+        if self.lyapunov_biasing and devices:
+            assignment = self.lyapunov.biased_assignment(
+                devices, list(range(self.M)), s.compute_q_cycles,
+                incoming_fn=self._predicted_handoff_cycles,
+                penalty_fn=self._assignment_penalty)
+        else:
+            assignment = base_assignment
 
         # --- 3. MPC: coverage-driven velocity per UAV, update positions ------
         moved = np.zeros(self.M, dtype=bool)
@@ -216,11 +277,13 @@ class Simulation:
             s.uav_pos[j] = s.uav_pos[j] + v * self.dt
             moved[j] = bool(np.linalg.norm(v) > 0.0)
 
-        # --- 4. APSO: compute-capacity allocation (skeleton: fraction per UAV) -
-        alloc_frac = self._apso_allocate()
+        # --- 4. APSO: compute-capacity allocation (wired; per-task split applied
+        #         in Increment 3 — the aggregate compute queue has no split to act
+        #         on yet, so its result is not used to throttle full CPU service). -
+        _alloc_frac = self._apso_allocate()
 
-        # --- 5. Lyapunov: (diagnostics computed after env update; adjust hook) -
-        _ = self.lyapunov.adjust(assignment)  # no-op in skeleton
+        # (Lyapunov stability diagnostics are computed after the env update; the
+        #  drift-plus-penalty *biasing* of the assignment was applied in step 2/5.)
 
         # --- 6. environment update ------------------------------------------
         arrivals_bits = self._arrivals(t)
@@ -229,10 +292,14 @@ class Simulation:
         for j in range(self.M):
             s.compute_q_cycles[j] += handoff_per_uav[j]                    # hand-off -> Q^c
 
+        # Compute service S^c_j = min(Q^c_j, C_j·dt): a UAV always runs its CPU at
+        # full capacity. APSO (alloc_frac) governs the per-task SPLIT of C_j across
+        # a UAV's tasks — that allocation is applied in Increment 3 (the skeleton
+        # tracks an aggregate compute queue, so the split has nothing to act on yet);
+        # it must NOT throttle total capacity. (`alloc_frac` is computed/ wired above.)
         executed = np.zeros(self.M)
         for j in range(self.M):
-            cap_cps = alloc_frac[j] * s.uav_capacity_cps[j]
-            ex = min(s.compute_q_cycles[j], cap_cps * self.dt)            # compute service S^c_j
+            ex = min(s.compute_q_cycles[j], s.uav_capacity_cps[j] * self.dt)  # S^c_j, full CPU
             s.compute_q_cycles[j] -= ex
             executed[j] = ex
 

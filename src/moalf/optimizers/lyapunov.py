@@ -63,11 +63,37 @@ class LyapunovController:
             "drift_plus_penalty": self.drift_plus_penalty(d, penalty),
         }
 
-    def adjust(self, decisions):
-        """Stability adjustment hook (spec §11 step 5).
+    def biased_assignment(self, devices, uavs, qc, incoming_fn, penalty_fn) -> dict:
+        """Per-slot drift-plus-penalty assignment minimization (spec §10.1, eq 34').
 
-        SKELETON: identity (no-op) — the per-slot drift-plus-penalty *minimization*
-        that biases MORL/MPC/APSO decisions (spec §10.1) is the next integration
-        increment. Returned unchanged so the pipeline is wired and reviewable.
+        For each device, choose the serving UAV that minimizes the *marginal*
+        two-tier drift-plus-penalty:
+
+            score(i -> j) = c_Q · Q^c_j · a_ij        (compute-tier drift term)
+                          + V · penalty(i, j)         (objective penalty, eq 34')
+
+        where ``a_ij = incoming_fn(i, j)`` is the cycles device i would hand to UAV
+        j this slot, and ``penalty_fn(i, j)`` is the 'morl'-projection objective
+        cost of serving i at j (the weights live on the Objective — D1; this
+        controller supplies only V and c_Q). Assignments are made greedily with a
+        running projected backlog ``qc_proj`` so that committing work to a UAV
+        raises its cost for subsequent devices — i.e. the term `Q^c_j·A^c_j` makes
+        the controller spread load off congested compute queues, bending drift down.
+
+        Lower V -> drift term dominates -> stronger load-spreading (more stable);
+        higher V -> objective dominates. V and c_Q are frozen (§18); biasing
+        reduces drift because that is what drift-plus-penalty does, not via tuning.
         """
-        return decisions
+        qc_proj = {j: float(qc[j]) for j in uavs}
+        assignment: dict = {}
+        for i in devices:
+            best_j, best_score = None, float("inf")
+            for j in uavs:
+                a = incoming_fn(i, j)
+                drift_term = self.c_Q * qc_proj[j] * a
+                score = drift_term + self.V * penalty_fn(i, j)
+                if score < best_score:
+                    best_score, best_j = score, j
+            assignment[i] = best_j
+            qc_proj[best_j] += incoming_fn(i, best_j)  # running backlog -> spread load
+        return assignment

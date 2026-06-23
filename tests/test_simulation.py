@@ -124,6 +124,60 @@ def test_coverage_in_range(config):
     assert 0.0 <= rec.coverage <= sim.N * sim.M + 1e-6
 
 
+# --- Increment 1: Lyapunov drift-plus-penalty biasing ------------------------
+def _high_load(config) -> dict:
+    """Test-local high-load config (λ≈0.6: demand ~94% of total compute capacity)
+    so an imbalanced base policy overloads UAVs and load-balancing matters.
+    Stresses the mechanism — NOT the frozen real config, NOT tuning a result."""
+    cfg = {k: (dict(v) if isinstance(v, dict) else v) for k, v in config.items()}
+    cfg["task"] = dict(config["task"],
+                       generation_rate_tps={"dist": "uniform", "low": 0.6, "high": 0.6})
+    return cfg
+
+
+def _run_compute_backlog(cfg, biasing, slots=25, seed=7):
+    sim = Simulation(cfg, seed=seed, offload_policy="nearest", lyapunov_biasing=biasing)
+    qc, max_ident = [], 0.0
+    for _ in range(slots):
+        rec = sim.step()
+        qc.append(float(sim.state.compute_q_cycles.sum()))
+        max_ident = max(max_ident, abs(rec.handoff_cycles - rec.handoff_cycles_check))
+    return np.array(qc), max_ident
+
+
+def test_biasing_materially_reduces_queue_growth(config):
+    cfg = _high_load(config)
+    off, _ = _run_compute_backlog(cfg, biasing=False)
+    on, _ = _run_compute_backlog(cfg, biasing=True)
+    # same seed, same fixed 'nearest' base policy: biasing must bend drift down
+    assert on.mean() < 0.5 * off.mean(), f"ON mean {on.mean():.3e} not << OFF {off.mean():.3e}"
+    assert on[-1] < off[-1]  # lower final backlog too
+
+
+def test_biasing_preserves_conservation_exactly(config):
+    # the biasing changes DECISIONS, not the bit/cycle accounting
+    cfg = _high_load(config)
+    sim = Simulation(cfg, seed=7, offload_policy="nearest", lyapunov_biasing=True)
+    for _ in range(10):
+        rec = sim.step()
+        assert rec.handoff_cycles == pytest.approx(rec.handoff_cycles_check, rel=1e-9, abs=1e-3)
+        assert rec.qr_after == pytest.approx(rec.qr_before + rec.arrivals_bits - rec.transmitted_bits, rel=1e-9, abs=1e-3)
+        assert rec.qc_after == pytest.approx(rec.qc_before + rec.handoff_cycles - rec.executed_cycles, rel=1e-9, abs=1e-1)
+
+
+def test_biasing_changes_assignment(config):
+    cfg = _high_load(config)
+    sim_off = Simulation(cfg, seed=7, offload_policy="nearest", lyapunov_biasing=False)
+    sim_on = Simulation(cfg, seed=7, offload_policy="nearest", lyapunov_biasing=True)
+    differed = False
+    for _ in range(6):
+        r_off = sim_off.step()
+        r_on = sim_on.step()
+        if r_off.assignment != r_on.assignment:
+            differed = True
+    assert differed, "biasing never changed the assignment vs the base policy"
+
+
 # --- Task hand-off intensity identity (unit) ---------------------------------
 def test_task_intensity_identity():
     L = 0.5 * MB_TO_BITS
