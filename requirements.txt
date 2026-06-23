@@ -1,0 +1,10 @@
+# Runtime + dev dependencies for the MOALF-UAV-MEC reference simulation.
+# TODO: pin exact versions before any published/reproducible run
+#       (e.g. `pip freeze` into a constraints file once the API stabilizes).
+# Versions intentionally left unpinned during early development.
+
+numpy
+scipy
+pyyaml
+matplotlib
+pytest

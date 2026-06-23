@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moalf"
+version = "0.0.0"
+description = "Reference simulation for the MOALF-UAV-MEC paper (IEEE IoT Journal, 2025)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Ali A. Al-Bakhrani" },
+]
+keywords = ["UAV", "MEC", "edge-computing", "multiobjective-optimization", "IoT", "reinforcement-learning"]
+# TODO: pin versions before any published/reproducible run.
+dependencies = [
+    "numpy",
+    "scipy",
+    "pyyaml",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+moalf = ["py.typed"]

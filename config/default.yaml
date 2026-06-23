@@ -1,0 +1,135 @@
+# =============================================================================
+# MOALF-UAV-MEC — default configuration
+# =============================================================================
+# Single source of truth for ALL parameters. No value may be hard-coded in code.
+#
+# Comment legend:
+#   # paper-stated            -> value taken from the paper (Table IV unless noted)
+#   # UNSPECIFIED — needs decision
+#                             -> paper does not give this; left null on purpose.
+#                                DO NOT invent a value; resolve via notes/corrected_spec.md.
+#
+# Distribution convention:
+#   {dist: uniform, low: a, high: b}          -> continuous Uniform[a, b]
+#   {dist: uniform_int, low: a, high: b}      -> integer Uniform{a..b} inclusive
+#
+# Cross-references point to notes/method_extraction.md and notes/results_extraction.md.
+# =============================================================================
+
+# ---- global run control -----------------------------------------------------
+run:
+  seed: null                 # UNSPECIFIED — needs decision (paper reports averages over "multiple runs" but gives no seed)
+  num_runs: null             # UNSPECIFIED — needs decision (Monte-Carlo repeat count for reported averages not stated)
+
+# ---- network (Sec. III-A) ---------------------------------------------------
+network:
+  area_m: [400, 400]         # paper-stated: 400 m x 400 m simulation area
+  num_time_steps: 1000       # paper-stated: simulation duration = 1000 time steps
+  time_step_s: 1             # paper-stated: Δt = 1 second
+  num_iot_devices: 50        # paper-stated: N = 50
+  num_uavs: 5                # paper-stated: M = 5
+  num_edge_servers: 3        # paper-stated: E = 3
+  num_network_slices: 3      # paper-stated: 3 network slices
+
+# ---- UAV model (Sec. III-B, III-F) ------------------------------------------
+uav:
+  compute_capacity_ghz: {dist: uniform, low: 2, high: 5}   # paper-stated: Uniform(2, 5) GHz
+  energy_capacity_wh: 1000                                 # paper-stated: 1000 Wh (E_j,max)
+  max_velocity_mps: 10                                     # paper-stated: 10 m/s
+  flight_energy_rate_w: 100                                # paper-stated: 100 W flight energy rate
+  compute_energy_rate_wh_per_cycle: 1.0e-9                 # paper-stated: 1e-9 Wh/cycle
+  harvest_rate_w: 5                                        # paper-stated: 5 W (η_j)
+  burst_mode_duration_steps: 20                            # paper-stated: 20 time steps
+  burst_mode_multiplier: 2                                 # paper-stated: 2x
+  initial_position_m: null    # UNSPECIFIED — needs decision (p_j(0) not given)
+  initial_energy_wh: null     # UNSPECIFIED — needs decision (E_j(0) not given; full charge is a guess)
+
+# ---- task model (Sec. III-C) ------------------------------------------------
+task:
+  generation_rate_tps: {dist: uniform, low: 0.1, high: 0.3}      # paper-stated: Uniform(0.1, 0.3) tasks/s (Poisson rate draw)
+  input_size_mb: {dist: uniform, low: 0.1, high: 1.0}            # paper-stated: Uniform(0.1, 1) MB (NOTE: prose on p.11 says "0 to 1 MB" — conflict, see method_extraction §6)
+  compute_req_megacycles: {dist: uniform, low: 100, high: 1000}  # paper-stated: Uniform(100, 1000) Megacycles
+  deadline_s: {dist: uniform, low: 5, high: 20}                  # paper-stated: Uniform(5, 20) s
+  priority: {dist: uniform_int, low: 1, high: 5}                 # paper-stated: Uniform integer(1, 5)
+  arrival_rate_time_profile: null  # UNSPECIFIED — needs decision (process called "nonhomogeneous"/time-varying but only a static rate draw is given; λ_i(t) profile not defined)
+
+# ---- channel / communication model (Sec. III-D, eq 6-7) ---------------------
+channel:
+  model: "rician"            # paper-stated: Rician fading
+  rician_k_db: 15            # paper-stated: K = 15 dB
+  iot_tx_power_w: 0.1        # paper-stated: 0.1 W (P_i)
+  reference_gain_beta0: null        # UNSPECIFIED — needs decision (β0 in eq 6)
+  path_loss_exponent_alpha: null    # UNSPECIFIED — needs decision (α in eq 6)
+  noise_psd_n0: null                # UNSPECIFIED — needs decision (N0 in eq 7)
+  bandwidth_hz: null                # UNSPECIFIED — needs decision (B in eq 7; "channel capacity 1000 Mb/s" is a capacity, not B)
+  uav_altitude_m: null              # UNSPECIFIED — needs decision (H in eq 6; sim area described as 2-D)
+  device_positions: null            # UNSPECIFIED — needs decision (q_i layout/distribution not given)
+
+# ---- computation model (Sec. III-E, eq 8-9) ---------------------------------
+computation:
+  energy_coefficient_kappa: null    # UNSPECIFIED — needs decision (κ_j in eq 9; relation to compute_energy_rate above is unclear, see method_extraction §6 #14)
+
+# ---- energy model (Sec. III-F, eq 10/12) ------------------------------------
+energy:
+  min_reserve_wh: null              # UNSPECIFIED — needs decision (E_min in constraint 23)
+  p_harv_model: null                # UNSPECIFIED — needs decision (P_harv(t) in eq 12; eq 10 vs eq 12 harvest terms conflict, see method_extraction §6 #16)
+
+# ---- MORL (Sec. IV-E, eq 27) ------------------------------------------------
+morl:
+  learning_rate: 0.001       # paper-stated: α = 0.001
+  discount_factor: 0.99      # paper-stated: γ = 0.99
+  epsilon_init: 1.0          # paper-stated: 1.0
+  epsilon_decay: 0.995       # paper-stated: 0.995
+  replay_buffer_size: 10000  # paper-stated: 10000
+  batch_size: 32             # paper-stated: 32
+  num_objectives: 3          # paper-stated: 3 (NOTE: conflicts with 6-term objective eq 14 and 4-term reward; see method_extraction §7 Q2)
+
+# ---- MPC (Sec. IV-F, eq 28, 39-41) ------------------------------------------
+mpc:
+  prediction_horizon: null   # UNSPECIFIED — needs decision (N; not in Table IV)
+  state_matrix_A: null       # UNSPECIFIED — needs decision (A in eq 40)
+  input_matrix_B: null       # UNSPECIFIED — needs decision (B in eq 40)
+  state_cost_Q: null         # UNSPECIFIED — needs decision (Q in eq 39)
+  input_cost_R: null         # UNSPECIFIED — needs decision (R in eq 39)
+  terminal_cost_P: null      # UNSPECIFIED — needs decision (P in eq 39)
+
+# ---- APSO (Sec. IV-G, eq 30-31) ---------------------------------------------
+apso:
+  swarm_size: null           # UNSPECIFIED — needs decision (P)
+  inertia_weight: null       # UNSPECIFIED — needs decision (w in eq 30)
+  cognitive_c1: null         # UNSPECIFIED — needs decision (c1 in eq 30)
+  social_c2: null            # UNSPECIFIED — needs decision (c2 in eq 30)
+  max_iterations: null       # UNSPECIFIED — needs decision (I)
+  adaptation_rule: null      # UNSPECIFIED — needs decision (the "adaptive" param-adjustment rule is not described)
+
+# ---- Lyapunov (Sec. IV-H, eq 32-34) -----------------------------------------
+lyapunov:
+  penalty_weight_V: null     # UNSPECIFIED — needs decision (V in drift-plus-penalty eq 34)
+  queue_init: null           # UNSPECIFIED — needs decision (Q_i(0); queue dynamics Q_i(t+1) never written, see method_extraction §6 #25)
+
+# ---- objective weights (Sec. III-H, eq 14) ----------------------------------
+# The single master objective. Optimizers use PROJECTIONS of these weights only
+# (no second weighting scheme — see corrected_spec.md). All six are unspecified.
+objective:
+  w1_task: null              # UNSPECIFIED — needs decision (weight of J_task)
+  w2_energy: null            # UNSPECIFIED — needs decision (weight of J_energy)
+  w3_completion: null        # UNSPECIFIED — needs decision (weight of J_completion)
+  w4_migration: null         # UNSPECIFIED — needs decision (weight of J_migration)
+  w5_util: null              # UNSPECIFIED — needs decision (weight of J_util)
+  w6_coverage: null          # UNSPECIFIED — needs decision (weight of J_coverage)
+  coverage_rate_threshold_rmin: null   # UNSPECIFIED — needs decision (R_min in eq 20)
+  migration_delay_delta: null          # UNSPECIFIED — needs decision (δ_l in eq 18)
+  migration_fixed_cost_epsilon: null   # UNSPECIFIED — needs decision (ε_l in eq 18)
+
+# ---- failures / no-fly zones (Table IV) -------------------------------------
+failures:
+  uav_failure_probability: 0.05         # paper-stated: 0.05 per episode
+  nofly_zone_probability: 0.1           # paper-stated: 0.1 per episode
+  nofly_zone_radius_m: {dist: uniform, low: 10, high: 50}  # paper-stated: Uniform(10, 50) m
+  link_reliability_threshold: 0.95      # paper-stated: 0.95
+
+# ---- SDN (Table IV) ---------------------------------------------------------
+sdn:
+  controller_delay_ms: 10    # paper-stated: 10 ms
+  flow_table_size: 1000      # paper-stated: 1000 entries
+  update_interval_ms: 100    # paper-stated: 100 ms

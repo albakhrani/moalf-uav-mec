@@ -1,0 +1,42 @@
+cff-version: 1.2.0
+message: >-
+  This repository is a reference simulation of the MOALF-UAV-MEC paper.
+  If you use this software, please cite both the software and the
+  original paper (see preferred-citation below).
+title: "MOALF-UAV-MEC: Reference Simulation"
+abstract: >-
+  Reproducible reference implementation of the adaptive multiobjective
+  optimization framework for UAV-assisted mobile edge computing described in
+  the MOALF-UAV-MEC paper (IEEE Internet of Things Journal, 2025).
+type: software
+authors:
+  - family-names: Al-Bakhrani
+    given-names: Ali A.
+license: MIT
+repository-code: ""  # TODO: add repository URL once published
+
+# The published paper this software reproduces. Cite this for the method.
+preferred-citation:
+  type: article
+  title: >-
+    MOALF-UAV-MEC: Adaptive Multiobjective Optimization for UAV-Assisted
+    Mobile Edge Computing in Dynamic IoT Environments
+  authors:
+    - family-names: Al-Bakhrani
+      given-names: Ali A.
+    - family-names: Li
+      given-names: Mingchu
+    - family-names: Obaidat
+      given-names: Mohammad S.
+    - family-names: Ameran
+      given-names: Gehad Abdullah
+  journal: "IEEE Internet of Things Journal"
+  year: 2025
+  month: 6
+  volume: 12
+  issue: 12
+  start: 20736
+  end: 20756
+  publisher:
+    name: IEEE
+  doi: ""  # TODO: confirm and add DOI (10.1109/JIOT.2025.xxxxxxx) — not filled to avoid an unverified value
