@@ -124,6 +124,19 @@ def test_coverage_in_range(config):
     assert 0.0 <= rec.coverage <= sim.N * sim.M + 1e-6
 
 
+# --- MPC cadence (spec §11 / B21) --------------------------------------------
+def test_mpc_cadence_holds_velocity_between_replans(config):
+    # with cadence_mpc=2: replan at slot 0, HOLD the same velocity at slot 1.
+    cfg = {k: (dict(v) if isinstance(v, dict) else v) for k, v in config.items()}
+    cfg["orchestration"] = dict(config.get("orchestration", {}), cadence_mpc_slots=2)
+    sim = Simulation(cfg, seed=5)
+    assert sim.cadence_mpc == 2
+    sim.step()                          # t=0: replan
+    v_after_plan = sim._last_v.copy()
+    sim.step()                          # t=1: hold (no replan)
+    assert np.array_equal(sim._last_v, v_after_plan)  # velocity unchanged on the held slot
+
+
 # --- Increment 1: Lyapunov drift-plus-penalty biasing ------------------------
 def _high_load(config) -> dict:
     """Test-local high-load config (λ≈0.6: demand ~94% of total compute capacity)

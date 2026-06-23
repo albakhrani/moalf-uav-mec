@@ -164,6 +164,13 @@ class Simulation:
         self.reward_scale = float(reward_scale) if reward_scale is not None \
             else 1.0 / max(drift_ref, 1e-300)
 
+        # orchestration cadences (spec §11 / eq 53 / B21): MPC re-plans every
+        # cadence_mpc slots, holding velocity between (the others run every slot
+        # in this implementation; their cadence interpretation is deferred).
+        orch = config.get("orchestration", {})
+        self.cadence_mpc = int(orch.get("cadence_mpc_slots", 1))
+        self._last_v = np.zeros((self.M, 2))
+
         self.state = self._init_state(seed)
 
     # ---- initial conditions (spec §14) --------------------------------------
@@ -322,12 +329,18 @@ class Simulation:
         qr_before = sum(task.remaining_bits for q in s.radio_q for task in q)
         qc_before = float(np.sum(s.compute_q_cycles))
 
-        # --- 3. MPC: coverage-driven velocity per UAV, update positions ------
+        # --- 3. MPC: coverage-driven velocity, honoring the m_MPC cadence -----
+        # Re-plan every `cadence_mpc` slots (spec §11 / eq 53 / B21); hold the last
+        # commanded velocity in between (receding-horizon-with-hold). This is both
+        # spec-faithful AND ~halves MPC cost (the runtime bottleneck).
+        if t % self.cadence_mpc == 0:
+            for j in range(self.M):
+                self._last_v[j] = self.mpc.plan(
+                    self.proj_mpc, self._mpc_evaluate_positions, j, s.uav_pos)
         moved = np.zeros(self.M, dtype=bool)
         for j in range(self.M):
-            v = self.mpc.plan(self.proj_mpc, self._mpc_evaluate_positions, j, s.uav_pos)
-            s.uav_pos[j] = s.uav_pos[j] + v * self.dt
-            moved[j] = bool(np.linalg.norm(v) > 0.0)
+            s.uav_pos[j] = s.uav_pos[j] + self._last_v[j] * self.dt
+            moved[j] = bool(np.linalg.norm(self._last_v[j]) > 0.0)
 
         # --- 4. APSO: compute-capacity allocation (wired; per-task split applied
         #         in Increment 3 — the aggregate compute queue has no split to act
