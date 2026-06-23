@@ -91,6 +91,7 @@ class SlotRecord:
     total_energy_j: float
     lyapunov: dict = field(default_factory=dict)
     assignment: dict = field(default_factory=dict)
+    mean_reward: float = 0.0   # set by train_step (Increment 2)
 
 
 @dataclass
@@ -108,7 +109,8 @@ class Simulation:
     """Algorithm-1 integration skeleton (spec §11)."""
 
     def __init__(self, config: Mapping[str, Any], *, seed: Optional[int] = None,
-                 offload_policy: str = "morl", lyapunov_biasing: bool = False):
+                 offload_policy: str = "morl", lyapunov_biasing: bool = False,
+                 reward_scale: Optional[float] = None):
         self.config = config
         if seed is None:
             seed = int(config["run"]["seed"])
@@ -153,6 +155,15 @@ class Simulation:
         self.e_max_j = float(config["uav"]["energy_capacity_wh"]) * 3600.0
         self.c_lo, self.c_hi = config["uav"]["compute_capacity_ghz"]["low"], config["uav"]["compute_capacity_ghz"]["high"]
 
+        # reward scale for in-loop MORL training: a uniform, POLICY-INVARIANT
+        # constant that brings the drift-plus-penalty marginal cost to ~O(1) for
+        # stable DQN gradients (it does not change the argmax/policy; numerical
+        # conditioning only, not result-tuning).
+        cbar_cps = 0.5 * (self.c_lo + self.c_hi) * 1e9
+        drift_ref = self.lyapunov.c_Q * (self.M * cbar_cps * self.dt) * (cbar_cps * self.dt)
+        self.reward_scale = float(reward_scale) if reward_scale is not None \
+            else 1.0 / max(drift_ref, 1e-300)
+
         self.state = self._init_state(seed)
 
     # ---- initial conditions (spec §14) --------------------------------------
@@ -183,8 +194,11 @@ class Simulation:
         s = self.state
         c = (s.uav_capacity_cps / 1e9 - self.c_lo) / (self.c_hi - self.c_lo)
         e = s.uav_energy_j / self.e_max_j
-        qmax = self.c_hi * 1e9 * 2.0
-        q = np.clip(s.compute_q_cycles / qmax, 0.0, 1.0)
+        # RELATIVE compute-load feature (load fraction across UAVs): exposes which
+        # UAV is less loaded at ANY absolute backlog scale — an absolute Q^c/qmax
+        # saturates to 1 under load and hides the balance signal MORL must learn.
+        total_qc = float(s.compute_q_cycles.sum())
+        q = (s.compute_q_cycles / total_qc) if total_qc > 0 else np.full(self.M, 1.0 / self.M)
         w = (head.cycles / MCYCLES_TO_CYCLES - self.W_lo) / (self.W_hi - self.W_lo)
         d = (head.deadline_s - self.d_lo) / (self.d_hi - self.d_lo)
         return np.concatenate([c, e, q, [w, d]]).astype(np.float32)
@@ -240,35 +254,73 @@ class Simulation:
         D = gaussian_coverage(positions, self.state.device_pos, self.sigma_cov)
         return {Term.TASK: 0.0, Term.ENERGY: 0.0, Term.COVERAGE: -D}
 
-    # ---- one slot (Algorithm 1) ---------------------------------------------
-    def step(self) -> SlotRecord:
+    # ---- assignment (spec §11 steps 2 & 5) ----------------------------------
+    def _assign(self, devices: list, t: int) -> dict:
+        """Base offload assignment (+ Lyapunov biasing if enabled). Used by step();
+        train_step() instead lets the MORL agent choose with reward shaping."""
         s = self.state
-        t = s.t
-        qr_before = sum(task.remaining_bits for q in s.radio_q for task in q)
-        qc_before = float(np.sum(s.compute_q_cycles))
-
-        # --- 1. observe (s) ---
-
-        # --- 2. MORL: base offload assignment for each non-empty device ------
-        devices = [i for i in range(self.N) if s.radio_q[i]]
-        base_assignment: dict = {}
+        base: dict = {}
         for i in devices:
             head = max(s.radio_q[i], key=lambda tk: tk.urgency(t))
             if self.offload_policy == "nearest":
                 gains = [float(self.channel.large_scale_gain(s.uav_pos[j], s.device_pos[i]))
                          for j in range(self.M)]
-                base_assignment[i] = int(np.argmax(gains))
-            else:  # "morl": untrained DQN greedy (in-loop training is Increment 2)
-                base_assignment[i] = self.morl.greedy(self._offload_state(i, head))
-
-        # --- 5 (applied here, spec §11): Lyapunov drift-plus-penalty biasing --
+                base[i] = int(np.argmax(gains))
+            else:  # "morl": DQN greedy (trained in-loop by train_step, Increment 2)
+                base[i] = self.morl.greedy(self._offload_state(i, head))
         if self.lyapunov_biasing and devices:
-            assignment = self.lyapunov.biased_assignment(
+            return self.lyapunov.biased_assignment(
                 devices, list(range(self.M)), s.compute_q_cycles,
                 incoming_fn=self._predicted_handoff_cycles,
                 penalty_fn=self._assignment_penalty)
-        else:
-            assignment = base_assignment
+        return base
+
+    # ---- one slot (Algorithm 1) ---------------------------------------------
+    def step(self) -> SlotRecord:
+        s = self.state
+        t = s.t
+        devices = [i for i in range(self.N) if s.radio_q[i]]   # steps 1-2
+        assignment = self._assign(devices, t)                  # steps 2 & 5
+        return self._advance(assignment)                       # steps 3,4,6,7
+
+    # ---- Increment 2: in-loop MORL training step ----------------------------
+    def train_step(self, epsilon: float) -> SlotRecord:
+        """One slot where the MORL agent CHOOSES the offload assignment (ε-greedy)
+        and LEARNS from the per-decision drift-plus-penalty reward (spec §10.1
+        biasing realized as reward shaping — so MORL *learns* the stability-aware
+        policy rather than being overridden). The agent then runs against the full
+        coupled system via :meth:`_advance` (MPC, APSO, env, two-tier queues)."""
+        s = self.state
+        t = s.t
+        devices = [i for i in range(self.N) if s.radio_q[i]]
+        qc_proj = s.compute_q_cycles.astype(float).copy()      # running backlog (like biased_assignment)
+        assignment: dict = {}
+        rewards = []
+        for i in devices:
+            head = max(s.radio_q[i], key=lambda tk: tk.urgency(t))
+            state_vec = self._offload_state(i, head)
+            j = self.morl.act(state_vec, epsilon)              # ε-greedy choice
+            assignment[i] = j
+            a_cyc = self._predicted_handoff_cycles(i, j)
+            # marginal drift-plus-penalty cost (eq 34'); reward = -cost (scaled, policy-invariant)
+            cost = (self.lyapunov.c_Q * qc_proj[j] * a_cyc
+                    + self.lyapunov.V * self._assignment_penalty(i, j))
+            r = -cost * self.reward_scale
+            self.morl.remember(state_vec, j, r, state_vec, True)  # contextual: done per decision
+            self.morl.learn()
+            rewards.append(r)
+            qc_proj[j] += a_cyc                                  # commit -> spread next device
+        self.morl.decay_epsilon()
+        rec = self._advance(assignment)
+        rec.mean_reward = float(np.mean(rewards)) if rewards else 0.0
+        return rec
+
+    # ---- shared environment advance (spec §11 steps 3,4,6,7) ----------------
+    def _advance(self, assignment: dict) -> SlotRecord:
+        s = self.state
+        t = s.t
+        qr_before = sum(task.remaining_bits for q in s.radio_q for task in q)
+        qc_before = float(np.sum(s.compute_q_cycles))
 
         # --- 3. MPC: coverage-driven velocity per UAV, update positions ------
         moved = np.zeros(self.M, dtype=bool)
