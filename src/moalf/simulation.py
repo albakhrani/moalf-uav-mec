@@ -59,6 +59,7 @@ class Task:
     priority: float        # ρ_{i,k}
     arrival_t: int         # t^a_{i,k}
     remaining_bits: float
+    tid: int = -1          # unique task id (for per-task compute tracking, Increment 3)
 
     @property
     def intensity(self) -> float:
@@ -102,7 +103,8 @@ class SimState:
     uav_capacity_cps: np.ndarray # (M,) cycles/s
     device_pos: np.ndarray       # (N, 2) m
     radio_q: List[List[Task]]    # per-device task lists (bits), Q^r_i
-    compute_q_cycles: np.ndarray # (M,) cycles, Q^c_j
+    compute_q_cycles: np.ndarray # (M,) cycles, Q^c_j (aggregate; kept in sync with compute_items)
+    compute_items: List[dict]    # per-UAV {tid: remaining_cycles} — per-task compute backlog (Increment 3)
 
 
 class Simulation:
@@ -170,6 +172,7 @@ class Simulation:
         orch = config.get("orchestration", {})
         self.cadence_mpc = int(orch.get("cadence_mpc_slots", 1))
         self._last_v = np.zeros((self.M, 2))
+        self._next_tid = 0  # unique task-id counter (Increment 3 per-task compute)
 
         self.state = self._init_state(seed)
 
@@ -187,6 +190,7 @@ class Simulation:
             device_pos=device_pos,
             radio_q=[[] for _ in range(self.N)],                          # Q^r_i(0)=0 (B25)
             compute_q_cycles=np.zeros(self.M),                            # Q^c_j(0)=0 (B25)
+            compute_items=[{} for _ in range(self.M)],                    # per-task backlog, empty
         )
 
     # ---- helpers ------------------------------------------------------------
@@ -194,7 +198,8 @@ class Simulation:
                     deadline_s: float, priority: float = 1.0) -> None:
         """Insert a task directly (for tests / controlled scenarios)."""
         self.state.radio_q[device].append(
-            Task(device, bits, cycles, deadline_s, priority, self.state.t, bits))
+            Task(device, bits, cycles, deadline_s, priority, self.state.t, bits, tid=self._next_tid))
+        self._next_tid += 1
 
     def _offload_state(self, device: int, head: Task) -> np.ndarray:
         """Per-device offload-decision features for MORL (matches the agent's dim)."""
@@ -342,31 +347,25 @@ class Simulation:
             s.uav_pos[j] = s.uav_pos[j] + self._last_v[j] * self.dt
             moved[j] = bool(np.linalg.norm(self._last_v[j]) > 0.0)
 
-        # --- 4. APSO: compute-capacity allocation (wired; per-task split applied
-        #         in Increment 3 — the aggregate compute queue has no split to act
-        #         on yet, so its result is not used to throttle full CPU service). -
-        _alloc_frac = self._apso_allocate()
-
         # (Lyapunov stability diagnostics are computed after the env update; the
-        #  drift-plus-penalty *biasing* of the assignment was applied in step 2/5.)
+        #  drift-plus-penalty *biasing* of the assignment was applied in step 2/5.
+        #  APSO runs per-UAV inside the compute-service step below, Increment 3.)
 
         # --- 6. environment update ------------------------------------------
         arrivals_bits = self._arrivals(t)
 
-        transmitted_bits, handoff_per_uav, handoff_check = self._radio_service(assignment, t)
-        for j in range(self.M):
-            s.compute_q_cycles[j] += handoff_per_uav[j]                    # hand-off -> Q^c
+        transmitted_bits, handoff_per_uav, handoff_check, handoff_per_task = \
+            self._radio_service(assignment, t)
+        for j in range(self.M):                                  # per-task hand-off -> Q^c items
+            for tid, cyc in handoff_per_task[j].items():
+                s.compute_items[j][tid] = s.compute_items[j].get(tid, 0.0) + cyc
+            s.compute_q_cycles[j] = sum(s.compute_items[j].values())   # sync aggregate
 
-        # Compute service S^c_j = min(Q^c_j, C_j·dt): a UAV always runs its CPU at
-        # full capacity. APSO (alloc_frac) governs the per-task SPLIT of C_j across
-        # a UAV's tasks — that allocation is applied in Increment 3 (the skeleton
-        # tracks an aggregate compute queue, so the split has nothing to act on yet);
-        # it must NOT throttle total capacity. (`alloc_frac` is computed/ wired above.)
+        # --- 4. APSO compute service: allocate C_j across each UAV's tasks -----
         executed = np.zeros(self.M)
         for j in range(self.M):
-            ex = min(s.compute_q_cycles[j], s.uav_capacity_cps[j] * self.dt)  # S^c_j, full CPU
-            s.compute_q_cycles[j] -= ex
-            executed[j] = ex
+            executed[j] = self._serve_compute(j)                 # APSO split + drain (Increment 3)
+            s.compute_q_cycles[j] = sum(s.compute_items[j].values())   # sync aggregate
 
         # energy update (eq 10): flight (if the UAV actually moved) + compute(executed), harvest
         for j in range(self.M):
@@ -409,7 +408,8 @@ class Simulation:
                 W = self.rng.uniform(self.W_lo, self.W_hi) * MCYCLES_TO_CYCLES
                 d = self.rng.uniform(self.d_lo, self.d_hi)
                 rho = self.rng.integers(self.rho_lo, self.rho_hi + 1)
-                self.state.radio_q[i].append(Task(i, L, W, d, float(rho), t, L))
+                self.state.radio_q[i].append(Task(i, L, W, d, float(rho), t, L, tid=self._next_tid))
+                self._next_tid += 1
                 added += L
         return added
 
@@ -421,6 +421,7 @@ class Simulation:
         handoff = np.zeros(self.M)
         handoff_check = 0.0
         transmitted_total = 0.0
+        handoff_per_task = [dict() for _ in range(self.M)]   # per-UAV {tid: cycles} this slot
         for i in range(self.N):
             if i not in assignment or not s.radio_q[i]:
                 continue
@@ -436,34 +437,71 @@ class Simulation:
                 task.remaining_bits -= b
                 budget -= b
                 transmitted_total += b
-                handoff[j] += b * task.intensity            # bits -> cycles (per task)
-                handoff_check += b * task.intensity
+                cyc = b * task.intensity                     # bits -> cycles (per task)
+                handoff[j] += cyc
+                handoff_check += cyc
+                handoff_per_task[j][task.tid] = handoff_per_task[j].get(task.tid, 0.0) + cyc
             # drop fully transmitted tasks from the radio queue
             s.radio_q[i] = [tk for tk in s.radio_q[i] if tk.remaining_bits > 1e-9]
-        return transmitted_total, handoff, handoff_check
+        return transmitted_total, handoff, handoff_check, handoff_per_task
 
-    def _apso_allocate(self) -> np.ndarray:
-        """APSO compute-capacity allocation (spec §9), SKELETON form.
+    def _serve_compute(self, j: int) -> float:
+        """Increment 3: APSO allocates UAV j's full capacity C_j across the tasks
+        in its compute queue, then each task drains at its allocated rate.
 
-        Allocates a per-UAV capacity fraction in [0,1]^M minimizing the 'apso'
-        projection of a simple latency/util/energy proxy. The full per-task f_ijk
-        allocation is the next increment; here it demonstrates the wired call and
-        yields fractions used to scale compute service.
+        Returns cycles executed at UAV j this slot. Conservation is exact: each
+        task drains by ≤ its remaining cycles and Σ ≤ C_j·Δt.
         """
-        s = self.state
-        Qc = s.compute_q_cycles
-        Ccps = s.uav_capacity_cps
+        items = self.state.compute_items[j]      # {tid: remaining_cycles}
+        if not items:
+            return 0.0
+        cap = float(self.state.uav_capacity_cps[j]) * self.dt   # cycles servable this slot
+        tids = list(items.keys())
+        rem = np.array([items[k] for k in tids], dtype=float)
+        total = float(rem.sum())
 
-        def evaluate_terms(frac):
-            frac = np.clip(np.asarray(frac, dtype=float), 0.0, 1.0)
-            served = frac * Ccps + 1.0
-            latency = float(np.sum((Qc + 1.0) / served))                 # s: backlog / served rate
-            cycles_served = frac * Ccps * self.dt
-            energy = float(np.sum(self.computation.exec_energy_j(cycles_served)))  # J (e_c-consistent units)
-            util = float(np.sum(frac))                                   # capacity used (reward)
+        if total <= cap + 1e-6:
+            # no contention: a UAV runs its CPU; everything queued can be served
+            served = rem.copy()
+        else:
+            # contention: APSO allocates the scarce capacity across tasks via the
+            # 'apso' projection (D1: weights from the Objective, not APSO).
+            served = self._apso_split(tids, rem, cap)
+
+        for k, key in enumerate(tids):
+            items[key] -= float(served[k])
+            if items[key] <= 1e-6:
+                del items[key]
+        return float(served.sum())
+
+    def _apso_split(self, tids, rem, cap) -> np.ndarray:
+        """APSO chooses the share of capacity each task gets (spec §9, eq 30-31),
+        minimizing the 'apso' projection {task, energy, util}. Returns cycles per
+        task (Σ ≤ cap, each ≤ its remaining)."""
+        n = len(tids)
+
+        def shares_to_served(shares):
+            sh = np.clip(np.asarray(shares, dtype=float), 1e-9, None)
+            sh = sh / sh.sum()
+            served = np.minimum(sh * cap, rem)          # cap at each task's need
+            leftover = cap - served.sum()               # redistribute spare to unmet tasks
+            if leftover > 1e-6:
+                deficit = rem - served
+                mask = deficit > 1e-9
+                if mask.any():
+                    add = np.minimum(deficit, leftover * deficit / deficit[mask].sum())
+                    served = served + np.where(mask, add, 0.0)
+            return served
+
+        def evaluate_terms(shares):
+            served = shares_to_served(shares)
+            rate = served / self.dt + 1.0
+            latency = float(np.sum(rem / rate))                       # s: time to clear each task
+            energy = float(self.computation.exec_energy_j(served.sum()))  # J (≈ const: Σserved≈cap)
+            util = float(served.sum() / cap)                          # capacity utilization (reward)
             return {Term.TASK: latency, Term.ENERGY: energy, Term.UTIL: -util}
 
         res = self.apso.optimize_allocation(
             self.proj_apso, evaluate_terms,
-            lower=np.zeros(self.M), upper=np.ones(self.M), rng=self.rng)
-        return np.clip(res.best_position, 0.0, 1.0)
+            lower=np.zeros(n), upper=np.ones(n), rng=self.rng, max_iterations=30)
+        return shares_to_served(res.best_position)

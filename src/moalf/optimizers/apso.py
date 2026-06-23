@@ -144,6 +144,8 @@ class APSO:
         lower,
         upper,
         rng: np.random.Generator,
+        *,
+        max_iterations: int | None = None,
     ) -> PSOResult:
         """Find the allocation minimizing the objective, scored ONLY via ``projection``.
 
@@ -163,4 +165,4 @@ class APSO:
         def fitness(x: np.ndarray) -> float:
             return projection.value(evaluate_terms(x))
 
-        return self.minimize(fitness, lower, upper, rng)
+        return self.minimize(fitness, lower, upper, rng, max_iterations=max_iterations)
