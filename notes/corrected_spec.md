@@ -203,10 +203,12 @@ PROPOSED reference scales (all 🔲 **SIGN-OFF**), with `N̂_task = N·λ̄·T_h
 | 2 energy | `N̂_task · W̄ · e_c  +  M · P_flight · Δt · T_h` | **total energy = compute + flight** (corrected 2026-06-23; see below and §15 entries 25–26) |
 | 3 completion | `N̂_task` | max possible completions |
 | ~~4 migration~~ | — | **REMOVED (A4)** — no migration term to normalize |
-| 5 util | `M · T_h` | max utilization-slots |
-| 6 coverage | `N` | all devices fully covered (ω_ij ≤ 1) |
+| 5 util | `M · T_h` | max utilization-slots (per-slot accrual) |
+| 6 coverage | `N · T_h` | all devices covered every slot over the horizon (per-slot accrual, like util; corrected 2026-06-23, §15 entry 28) |
 
 with `N̂_task = N·λ̄·T_h ≈ 10000`, `W̄ = 5.5×10⁸ cycles` (mean of `W`), `e_c = 3.6×10⁻⁶ J/cycle`.
+
+**Per-slot vs per-task accrual (why the scales differ).** Terms that accrue **every slot** (energy flight component, `util`, `coverage`) carry a `T_h` factor in their scale; terms counted **once per task** (`task` latency, `completion`) scale with `N̂_task`. The coverage scale was initially `N` (missing `T_h`) — corrected to `N·T_h` so `J̃_coverage` is O(1) like the others (entry 28).
 
 **`S_energy` correction (CORRECTNESS, not tuning — §18).** The earlier flight-only scale `M·P_flight·Δt·T_h ≈ 0.5 MJ` was wrong: the implemented computation model (§4.5) shows **compute energy dominates flight energy by ~40×** (expected compute `≈ N̂_task·W̄·e_c ≈ 19.8 MJ` vs flight `≈ 0.5 MJ`; see §15 entry 25). A flight-only normalizer would leave `J̃_energy ≈ 40` while the other normalized terms are O(1), silently letting energy swamp the objective. The corrected scale uses **total expected per-run energy**:
 ```
@@ -481,6 +483,7 @@ One line each: **paper said → we chose → why.**
 25. **FINDING — 2026-06-23 (from `computation.py` sanity check):** With the paper-stated `e_c = 1×10⁻⁹ Wh/cycle (= 3.6×10⁻⁶ J/cycle)`, expected **compute energy ≈ 19.8 MJ/run** (`N̂_task·W̄·e_c`, with `N̂_task≈10⁴`, `W̄=5.5×10⁸ cyc`) vs **flight energy ≈ 0.5 MJ/run** (`M·P_flight·Δt·T_h`) — **compute dominates flight by ~40×**. The author **confirms `e_c` is intentional (not an erratum)**. *Consequence:* the original flight-only `S_energy` normalizer mis-scaled `J̃_energy` by ~40× (it would read ~40 while other normalized terms are O(1)). *(computation.py / §4.5 / §5.3)*
 26. **CORRECTION — 2026-06-23 (`S_energy`, correctness not tuning, §18):** §5.3 `S_energy` changed from flight-only `M·P_flight·Δt·T_h` to **total expected energy** `N̂_task·W̄·e_c + M·P_flight·Δt·T_h ≈ 2.03×10⁷ J (≈20.3 MJ)`, so `J̃_energy` is O(1) like the other normalized terms. **Reason:** a normalizer must match the magnitude of the quantity it normalizes — *independent of any target result* (the fix is identical whatever number the paper reported). Follows directly from entry 25. *(§5.3 / §18)*
 27. **PREDICTION — 2026-06-23 (before the objective/optimizer runs):** because compute energy dominates, `J_energy` is now **primarily a measure of compute volume**, which is in **direct tension with `J̃_completion`** (completing more tasks necessarily costs more compute energy). The **`J̃_energy` vs `J̃_completion` weight balance (`w2` vs `w3`) is therefore expected to be highly influential** on the trade-off the system finds. To be **explored via the planned §5.4 weight-sweep**, reported as a Pareto curve — **NOT** resolved by tuning toward any paper metric (§18). Logged so the expectation predates the sweep. *(§5.4 / §18 / objective.py-to-come)*
+28. **CORRECTION — 2026-06-23 (`S_coverage`, found while building objective.py; correctness not tuning, §18):** §5.3 `S_coverage` changed from `N` to **`N · T_h`**. *Reason:* `J_coverage = −Σ_t D(p(t))` accrues **every slot** over the horizon (like `util` and flight energy), so its magnitude is ~`N·T_h`; the flight-... err, the `N`-only scale would have left `J̃_coverage ≈ T_h = 1000` rather than O(1), dominating the objective ~1000×. Same class as the S_energy fix (entry 26): a normalizer must match the magnitude of what it normalizes, independent of any target result. Establishes the per-slot-accrual (`×T_h`) vs per-task (`×N̂_task`) rule now documented in §5.3. *(§5.3 / §18)*
 
 ---
 
