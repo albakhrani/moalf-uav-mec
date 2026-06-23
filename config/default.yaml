@@ -4,132 +4,158 @@
 # Single source of truth for ALL parameters. No value may be hard-coded in code.
 #
 # Comment legend:
-#   # paper-stated            -> value taken from the paper (Table IV unless noted)
-#   # UNSPECIFIED — needs decision
-#                             -> paper does not give this; left null on purpose.
-#                                DO NOT invent a value; resolve via notes/corrected_spec.md.
+#   # paper-stated     -> value taken from the paper (Table IV unless noted)
+#   # approved         -> previously-unspecified; value signed off 2026-06-23
+#                         (see notes/signoff_worksheet.md and corrected_spec.md §16).
+#                         Bracketed tag [A#/B#] gives the sign-off item id.
 #
 # Distribution convention:
 #   {dist: uniform, low: a, high: b}          -> continuous Uniform[a, b]
 #   {dist: uniform_int, low: a, high: b}      -> integer Uniform{a..b} inclusive
 #
-# Cross-references point to notes/method_extraction.md and notes/results_extraction.md.
+# Status: §16 SIGNED OFF (2026-06-23). Migration dropped (A4); two-tier queue (A1).
+# Cross-references: corrected_spec.md (authoritative), method/results_extraction.md.
 # =============================================================================
 
 # ---- global run control -----------------------------------------------------
 run:
-  seed: null                 # UNSPECIFIED — needs decision (paper reports averages over "multiple runs" but gives no seed)
-  num_runs: null             # UNSPECIFIED — needs decision (Monte-Carlo repeat count for reported averages not stated)
+  seed: 42                    # approved [B27] FROZEN PERMANENT (anti-tuning §18); runs 0..29 use seeds 42..71
+  num_runs: 30                # paper-stated (§VI methodology): 30 independent runs per configuration
 
-# ---- network (Sec. III-A) ---------------------------------------------------
+# ---- network (spec §4.1) ----------------------------------------------------
 network:
   area_m: [400, 400]         # paper-stated: 400 m x 400 m simulation area
-  num_time_steps: 1000       # paper-stated: simulation duration = 1000 time steps
+  num_time_steps: 1000       # paper-stated: T_h = 1000 time steps
   time_step_s: 1             # paper-stated: Δt = 1 second
   num_iot_devices: 50        # paper-stated: N = 50
   num_uavs: 5                # paper-stated: M = 5
-  num_edge_servers: 3        # paper-stated: E = 3
+  num_edge_servers: 3        # paper-stated: N_G = 3
   num_network_slices: 3      # paper-stated: 3 network slices
+  device_positions: uniform_random_in_area   # approved [B26]: q_i drawn uniformly in area, fixed per run (seeded)
 
-# ---- UAV model (Sec. III-B, III-F) ------------------------------------------
+# ---- UAV model (spec §4.2, §4.6) --------------------------------------------
 uav:
-  compute_capacity_ghz: {dist: uniform, low: 2, high: 5}   # paper-stated: Uniform(2, 5) GHz
-  energy_capacity_wh: 1000                                 # paper-stated: 1000 Wh (E_j,max)
-  max_velocity_mps: 10                                     # paper-stated: 10 m/s
-  flight_energy_rate_w: 100                                # paper-stated: 100 W flight energy rate
-  compute_energy_rate_wh_per_cycle: 1.0e-9                 # paper-stated: 1e-9 Wh/cycle
+  compute_capacity_ghz: {dist: uniform, low: 2, high: 5}   # paper-stated: Uniform(2, 5) GHz (C_j)
+  energy_capacity_wh: 1000                                 # paper-stated: 1000 Wh (E_max)
+  max_velocity_mps: 10                                     # paper-stated: 10 m/s (v_max)
+  flight_energy_rate_w: 100                                # paper-stated: 100 W (P_flight)
+  compute_energy_rate_wh_per_cycle: 1.0e-9                 # paper-stated: 1e-9 Wh/cycle (e_c; linear model, B6)
   harvest_rate_w: 5                                        # paper-stated: 5 W (η_j)
   burst_mode_duration_steps: 20                            # paper-stated: 20 time steps
   burst_mode_multiplier: 2                                 # paper-stated: 2x
-  initial_position_m: null    # UNSPECIFIED — needs decision (p_j(0) not given)
-  initial_energy_wh: null     # UNSPECIFIED — needs decision (E_j(0) not given; full charge is a guess)
+  initial_position: uniform_random_in_area                 # approved [B23]: p_j(0) uniform in area, z = channel.uav_altitude_m
+  initial_energy_wh: 1000                                  # approved [B24]: E_j(0) = E_max (start fully charged)
 
-# ---- task model (Sec. III-C) ------------------------------------------------
+# ---- task model (spec §4.3) -------------------------------------------------
 task:
-  generation_rate_tps: {dist: uniform, low: 0.1, high: 0.3}      # paper-stated: Uniform(0.1, 0.3) tasks/s (Poisson rate draw)
-  input_size_mb: {dist: uniform, low: 0.1, high: 1.0}            # paper-stated: Uniform(0.1, 1) MB (NOTE: prose on p.11 says "0 to 1 MB" — conflict, see method_extraction §6)
-  compute_req_megacycles: {dist: uniform, low: 100, high: 1000}  # paper-stated: Uniform(100, 1000) Megacycles
-  deadline_s: {dist: uniform, low: 5, high: 20}                  # paper-stated: Uniform(5, 20) s
-  priority: {dist: uniform_int, low: 1, high: 5}                 # paper-stated: Uniform integer(1, 5)
-  arrival_rate_time_profile: null  # UNSPECIFIED — needs decision (process called "nonhomogeneous"/time-varying but only a static rate draw is given; λ_i(t) profile not defined)
+  generation_rate_tps: {dist: uniform, low: 0.1, high: 0.3}      # paper-stated: Uniform(0.1, 0.3) tasks/s (Poisson rate λ_i)
+  input_size_mb: {dist: uniform, low: 0.1, high: 1.0}            # paper-stated: Uniform(0.1, 1) MB (L); see changelog re prose "0–1"
+  compute_req_megacycles: {dist: uniform, low: 100, high: 1000}  # paper-stated: Uniform(100, 1000) Megacycles (W)
+  deadline_s: {dist: uniform, low: 5, high: 20}                  # paper-stated: Uniform(5, 20) s (τ)
+  priority: {dist: uniform_int, low: 1, high: 5}                 # paper-stated: Uniform integer(1, 5) (ρ)
+  arrival_process: homogeneous_poisson                          # approved [A5-rel/§4.3]: homogeneous λ_i (no time profile given)
 
-# ---- channel / communication model (Sec. III-D, eq 6-7) ---------------------
+# ---- channel / communication model (spec §4.4; eqs 6–7) ---------------------
+# eq 6: h_ij = beta0 * (||p_j - q_i||^2 + H^2)^(-alpha/2) * xi_ij   (xi = Rician fading)
+# eq 7: R_ij = B * log2(1 + P_tx * h_ij / (N0 * B))
 channel:
-  model: "rician"            # paper-stated: Rician fading
-  rician_k_db: 15            # paper-stated: K = 15 dB
-  iot_tx_power_w: 0.1        # paper-stated: 0.1 W (P_i)
-  reference_gain_beta0: null        # UNSPECIFIED — needs decision (β0 in eq 6)
-  path_loss_exponent_alpha: null    # UNSPECIFIED — needs decision (α in eq 6)
-  noise_psd_n0: null                # UNSPECIFIED — needs decision (N0 in eq 7)
-  bandwidth_hz: null                # UNSPECIFIED — needs decision (B in eq 7; "channel capacity 1000 Mb/s" is a capacity, not B)
-  uav_altitude_m: null              # UNSPECIFIED — needs decision (H in eq 6; sim area described as 2-D)
-  device_positions: null            # UNSPECIFIED — needs decision (q_i layout/distribution not given)
+  model: rician                       # paper-stated: Rician fading (xi_ij)
+  rician_k_db: 15                     # paper-stated: K = 15 dB
+  iot_tx_power_w: 0.1                 # paper-stated: 0.1 W (P_tx)
+  reference_gain_beta0_db: -30        # approved [B1]: beta0 ref gain @1 m = -30 dB (1e-3 linear); typical sub-6 GHz
+  path_loss_exponent_alpha: 2.0       # approved [B2]: LoS-dominant air-to-ground (consistent w/ K=15 dB)
+  noise_psd_dbm_per_hz: -174          # approved [B3]: standard thermal noise floor (N0)
+  bandwidth_hz: 1.0e+6                # approved [B4]: B = 1 MHz (Table IV's 1000 Mb/s is aggregate capacity, not B)
+  uav_altitude_m: 100                 # approved [B5]: H = 100 m, fixed (2-D motion, A5)
 
-# ---- computation model (Sec. III-E, eq 8-9) ---------------------------------
+# ---- computation model (spec §4.5; eq 8, linear energy B6) ------------------
 computation:
-  energy_coefficient_kappa: null    # UNSPECIFIED — needs decision (κ_j in eq 9; relation to compute_energy_rate above is unclear, see method_extraction §6 #14)
+  energy_model: linear                # approved [B6]: E_exec = e_c * W  (uses uav.compute_energy_rate_wh_per_cycle)
+  # quadratic eq (9) E = kappa*C^2*W NOT used (no coefficient given); see §4.5 / changelog.
 
-# ---- energy model (Sec. III-F, eq 10/12) ------------------------------------
+# ---- energy model (spec §4.6; eq 10 form) -----------------------------------
 energy:
-  min_reserve_wh: null              # UNSPECIFIED — needs decision (E_min in constraint 23)
-  p_harv_model: null                # UNSPECIFIED — needs decision (P_harv(t) in eq 12; eq 10 vs eq 12 harvest terms conflict, see method_extraction §6 #16)
+  harvest_model: linear_eta_dt        # approved [§4.6]: E += η_j*Δt (eq 10); eq 12 P_harv form not used
+  min_reserve_wh: 100                 # approved [B12]: E_min = 100 Wh (10% of E_max); constraint (23)
 
-# ---- MORL (Sec. IV-E, eq 27) ------------------------------------------------
+# ---- queue model — TWO-TIER (spec §4.7; A1) ---------------------------------
+# Tier 1 radio backlog Q^r_i (bits) -> per-task hand-off (bits->cycles via r_{i,k}=W/L)
+#  -> Tier 2 compute backlog Q^c_j (cycles).
+queue:
+  radio_init_bits: 0                  # approved [B25]: Q^r_i(0) = 0
+  compute_init_cycles: 0              # approved [B25]: Q^c_j(0) = 0
+  radio_service_discipline: priority_by_urgency   # approved [§4.7/entry 23]: drain by descending U_{i,k} (eq 5), ties by earliest arrival
+  intensity_handling: per_task        # approved [A1]: hand-off converts EACH task by its own r_{i,k}=W/L (cycles/bit), never a device mean
+
+# ---- MORL — offloading only (spec §7; migration dropped A4) ------------------
 morl:
-  learning_rate: 0.001       # paper-stated: α = 0.001
+  learning_rate: 0.001       # paper-stated: α_lr = 0.001
   discount_factor: 0.99      # paper-stated: γ = 0.99
   epsilon_init: 1.0          # paper-stated: 1.0
   epsilon_decay: 0.995       # paper-stated: 0.995
   replay_buffer_size: 10000  # paper-stated: 10000
   batch_size: 32             # paper-stated: 32
-  num_objectives: 3          # paper-stated: 3 (NOTE: conflicts with 6-term objective eq 14 and 4-term reward; see method_extraction §7 Q2)
+  episodes: 1                # approved [B22]: 1 run = 1 episode of T_h slots
+  projection_terms: [task, energy, completion, util]   # spec §6: MORL sees m∈{1,2,3,5}; scalarized reward (A2)
+  # NOTE: Table IV "num_objectives=3" overridden (spec §6); master objective has 5 active terms.
 
-# ---- MPC (Sec. IV-F, eq 28, 39-41) ------------------------------------------
+# ---- MPC — trajectory (spec §8; direct form, LQR-QP skipped B7) --------------
 mpc:
-  prediction_horizon: null   # UNSPECIFIED — needs decision (N; not in Table IV)
-  state_matrix_A: null       # UNSPECIFIED — needs decision (A in eq 40)
-  input_matrix_B: null       # UNSPECIFIED — needs decision (B in eq 40)
-  state_cost_Q: null         # UNSPECIFIED — needs decision (Q in eq 39)
-  input_cost_R: null         # UNSPECIFIED — needs decision (R in eq 39)
-  terminal_cost_P: null      # UNSPECIFIED — needs decision (P in eq 39)
+  prediction_horizon: 10     # approved [B16]: N_h = 10 slots (foresight vs O(M·N_h^3))
+  formulation: direct        # approved [B7]: direct receding-horizon (§8.2); LQR-QP eqs (39)-(41) NOT used
+  projection_terms: [task, energy, coverage]   # spec §6: MPC sees m∈{1,2,6}
 
-# ---- APSO (Sec. IV-G, eq 30-31) ---------------------------------------------
+# ---- APSO — resource allocation (spec §9) -----------------------------------
 apso:
-  swarm_size: null           # UNSPECIFIED — needs decision (P)
-  inertia_weight: null       # UNSPECIFIED — needs decision (w in eq 30)
-  cognitive_c1: null         # UNSPECIFIED — needs decision (c1 in eq 30)
-  social_c2: null            # UNSPECIFIED — needs decision (c2 in eq 30)
-  max_iterations: null       # UNSPECIFIED — needs decision (I)
-  adaptation_rule: null      # UNSPECIFIED — needs decision (the "adaptive" param-adjustment rule is not described)
+  swarm_size: 30                      # approved [B17]
+  inertia_start: 0.9                  # approved [B18]: w_in linear decay 0.9 -> 0.4 (the "adaptive" rule)
+  inertia_end: 0.4                    # approved [B18]
+  cognitive_c1: 1.49                  # approved [B19]: Clerc-constriction standard
+  social_c2: 1.49                     # approved [B19]
+  max_iterations: 100                 # approved [B20]
+  projection_terms: [task, energy, util]   # spec §6: APSO sees m∈{1,2,5}
 
-# ---- Lyapunov (Sec. IV-H, eq 32-34) -----------------------------------------
+# ---- Lyapunov — two-tier drift-plus-penalty (spec §10; A1) -------------------
 lyapunov:
-  penalty_weight_V: null     # UNSPECIFIED — needs decision (V in drift-plus-penalty eq 34)
-  queue_init: null           # UNSPECIFIED — needs decision (Q_i(0); queue dynamics Q_i(t+1) never written, see method_extraction §6 #25)
+  penalty_weight_V: 1.0               # approved [B15]: V = 1.0 (to be swept; small V favors stability)
+  tier_scaling_c_Q: 6.4e-5            # approved [A1/§10.1]: c_Q = r_bar^-2, r_bar≈125 cyc/bit (representative; balances bits^2 vs cycles^2)
+  # r_bar handling: representative mean intensity for the Lyapunov metric ONLY; actual work conversion uses per-task r_{i,k} at the hand-off (§4.7).
 
-# ---- objective weights (Sec. III-H, eq 14) ----------------------------------
-# The single master objective. Optimizers use PROJECTIONS of these weights only
-# (no second weighting scheme — see corrected_spec.md). All six are unspecified.
+# ---- objective — single master (spec §5; 5 active terms, migration dropped) -
+# min J = Σ_{m∈{1,2,3,5,6}} w_m · J̃_m   (normalized terms, §5.3). Default w_m = 1.0.
 objective:
-  w1_task: null              # UNSPECIFIED — needs decision (weight of J_task)
-  w2_energy: null            # UNSPECIFIED — needs decision (weight of J_energy)
-  w3_completion: null        # UNSPECIFIED — needs decision (weight of J_completion)
-  w4_migration: null         # UNSPECIFIED — needs decision (weight of J_migration)
-  w5_util: null              # UNSPECIFIED — needs decision (weight of J_util)
-  w6_coverage: null          # UNSPECIFIED — needs decision (weight of J_coverage)
-  coverage_rate_threshold_rmin: null   # UNSPECIFIED — needs decision (R_min in eq 20)
-  migration_delay_delta: null          # UNSPECIFIED — needs decision (δ_l in eq 18)
-  migration_fixed_cost_epsilon: null   # UNSPECIFIED — needs decision (ε_l in eq 18)
+  w1_task: 1.0               # approved [B14]: weight of J_task (normalized)
+  w2_energy: 1.0             # approved [B14]: weight of J_energy
+  w3_completion: 1.0         # approved [B14]: weight of J_completion
+  # w4_migration REMOVED (A4: migration dropped) — index retired, NOT renumbered
+  w5_util: 1.0               # approved [B14]: weight of J_util
+  w6_coverage: 1.0           # approved [B14]: weight of J_coverage
+  normalization: fixed_reference_scales   # approved [B13]: J̃_m = J_m / S_m, scales computed once from config (§5.3)
+  coverage_radius_sigma_m: 100            # approved [B10]: σ_cov for Gaussian coverage D(p) (§5.2)
+  coverage_demand_weight: 1.0             # approved [B11]: ω_ij = 1.0 ∀i,j (uniform demand)
+  coverage_rate_threshold_rmin_bps: 1.0e+6 # approved [B10-rel]: R_min = 1 Mb/s (eval-side rate-coverage metric only)
 
 # ---- failures / no-fly zones (Table IV) -------------------------------------
 failures:
   uav_failure_probability: 0.05         # paper-stated: 0.05 per episode
   nofly_zone_probability: 0.1           # paper-stated: 0.1 per episode
   nofly_zone_radius_m: {dist: uniform, low: 10, high: 50}  # paper-stated: Uniform(10, 50) m
-  link_reliability_threshold: 0.95      # paper-stated: 0.95
+  link_reliability_threshold: 0.95      # paper-stated: 0.95 (θ_rel)
 
 # ---- SDN (Table IV) ---------------------------------------------------------
 sdn:
   controller_delay_ms: 10    # paper-stated: 10 ms
   flow_table_size: 1000      # paper-stated: 1000 entries
   update_interval_ms: 100    # paper-stated: 100 ms
+
+# ---- orchestration timescales (spec §11; eq 53) -----------------------------
+orchestration:
+  cadence_morl_slots: 10     # approved [B21]: m_MORL (slowest)
+  cadence_mpc_slots: 2       # approved [B21]: m_MPC
+  cadence_apso_slots: 1      # approved [B21]: m_APSO (fastest)
+
+# =============================================================================
+# REMOVED by sign-off (migration dropped, A4): objective.w4_migration,
+# objective.migration_delay_delta (δ_l, B8), objective.migration_fixed_cost_epsilon
+# (ε_l, B9), and computation.energy_coefficient_kappa (linear model chosen, B6).
+# =============================================================================
