@@ -1,10 +1,15 @@
 # Runtime + dev dependencies for the MOALF-UAV-MEC reference simulation.
-# TODO: pin exact versions before any published/reproducible run
+# TODO: pin remaining exact versions before any published/reproducible run
 #       (e.g. `pip freeze` into a constraints file once the API stabilizes).
-# Versions intentionally left unpinned during early development.
+# Versions left unpinned during early development EXCEPT torch (MORL needs a
+# reproducible build — see src/moalf/optimizers/morl.py).
 
 numpy
 scipy
 pyyaml
 matplotlib
 pytest
+
+# MORL (DQN) — pinned for reproducibility. Exact bit-reproducibility also
+# requires matching the build (CPU/CUDA). Dev/CI here used 2.0.1 (+cu117 build).
+torch==2.0.1
