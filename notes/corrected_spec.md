@@ -197,16 +197,24 @@ J̃_m = J_m / S_m
 ```
 PROPOSED reference scales (all 🔲 **SIGN-OFF**), with `N̂_task = N·λ̄·T_h ≈ 50·0.2·1000 = 10000` expected tasks, `τ̄ = 12.5 s` mean deadline:
 
-| m | `S_m` (PROPOSED) | Rationale |
+| m | `S_m` | Rationale |
 |---|---|---|
 | 1 task | `N̂_task · τ̄` | total latency if every task took its mean deadline |
-| 2 energy | `M · P_flight · Δt · T_h` | total flight energy over horizon (flight-dominated) |
+| 2 energy | `N̂_task · W̄ · e_c  +  M · P_flight · Δt · T_h` | **total energy = compute + flight** (corrected 2026-06-23; see below and §15 entries 25–26) |
 | 3 completion | `N̂_task` | max possible completions |
 | ~~4 migration~~ | — | **REMOVED (A4)** — no migration term to normalize |
 | 5 util | `M · T_h` | max utilization-slots |
 | 6 coverage | `N` | all devices fully covered (ω_ij ≤ 1) |
 
-Result: each `J̃_m` is dimensionless and O(1); terms 3,5,6 lie in ~[−1,0]. 🔲 **SIGN-OFF (normalization scheme).** Alternative (z-score / min-max over a warm-up) is possible but less reproducible — not chosen.
+with `N̂_task = N·λ̄·T_h ≈ 10000`, `W̄ = 5.5×10⁸ cycles` (mean of `W`), `e_c = 3.6×10⁻⁶ J/cycle`.
+
+**`S_energy` correction (CORRECTNESS, not tuning — §18).** The earlier flight-only scale `M·P_flight·Δt·T_h ≈ 0.5 MJ` was wrong: the implemented computation model (§4.5) shows **compute energy dominates flight energy by ~40×** (expected compute `≈ N̂_task·W̄·e_c ≈ 19.8 MJ` vs flight `≈ 0.5 MJ`; see §15 entry 25). A flight-only normalizer would leave `J̃_energy ≈ 40` while the other normalized terms are O(1), silently letting energy swamp the objective. The corrected scale uses **total expected per-run energy**:
+```
+S_energy = N̂_task · W̄ · e_c  +  M · P_flight · Δt · T_h  ≈ 1.98×10⁷ + 0.50×10⁶ ≈ 2.03×10⁷ J  (≈ 20.3 MJ).
+```
+*Reason for the change:* a normalizer must match the magnitude of the quantity it normalizes; this is independent of any target result (the fix would be identical whatever number the paper reported).
+
+Result: each `J̃_m` is dimensionless and O(1); terms 3,5,6 lie in ~[−1,0]. (Normalization scheme signed off 2026-06-23 with this correction.) Alternative (z-score / min-max over a warm-up) is possible but less reproducible — not chosen.
 
 ### 5.4 Weights
 - Default: `w_1 = … = w_6 = 1.0`, applied to the **normalized** terms.
@@ -463,6 +471,16 @@ One line each: **paper said → we chose → why.**
 23. **Radio-queue service discipline → PRIORITY-BY-URGENCY (2026-06-23):** the §4.7 flag resolved to draining tasks by descending urgency `U_{i,k}` (eq 5), highest first, ties by earliest arrival — *not* FIFO. *Why:* aligns the queue with the `J_completion` deadline objective and reuses the urgency already in MORL's state. Checked against the Lyapunov drift (§10.3): **no stability conflict** — work-conserving so radio-tier drift is unchanged and the compute-tier rate condition is preserved; the discipline is mildly drift-suboptimal but not destabilizing, and starvation is self-limiting via eq 5. *(§4.7/§10.3)*
 
 > **Net structural changes from this sign-off:** (a) one queue → two coupled queues; (b) six objective terms → five (migration gone); (c) radio queue drains by urgency. All other §16 items approved as proposed. Config folded 2026-06-23; implementation begun (channel first).
+
+### Predictions (logged pre-experiment, for honest comparison later)
+
+24. **PREDICTION — 2026-06-23 (before any trajectory run):** With the as-approved channel constants (B1–B5), the channel model yields **SNR ≈ 51–64 dB cell-wide** (measured from the implemented `channel.py` across 10–400 m, `β0=−30 dB`, `α_path=2`, `P_tx=0.1 W`, `B=1 MHz`, `H=100 m`). The radio link is therefore **not the bottleneck**; the compute tier dominates. **Prediction:** the paper's trajectory/route-optimization result (**38% route reduction**) may show **weak leverage in this regime**, because UAV position barely affects an already-saturated link — so a consistent re-implementation could land at **Tier 3** (divergent) on that specific metric. To be **checked when the trajectory experiment runs**. **Per §18 this is NOT to be addressed by tuning channel params**; the only admissible response is to re-examine, on physical grounds, whether the paper's intended bandwidth / path-loss / cell-size differ from the proposed B1–B5 (e.g. a wider cell, higher `α`, or smaller `B` would make position matter more). Logged so the prediction predates the result. *(§18 / B1–B5 / channel.py)*
+
+### Findings & corrections (post-implementation)
+
+25. **FINDING — 2026-06-23 (from `computation.py` sanity check):** With the paper-stated `e_c = 1×10⁻⁹ Wh/cycle (= 3.6×10⁻⁶ J/cycle)`, expected **compute energy ≈ 19.8 MJ/run** (`N̂_task·W̄·e_c`, with `N̂_task≈10⁴`, `W̄=5.5×10⁸ cyc`) vs **flight energy ≈ 0.5 MJ/run** (`M·P_flight·Δt·T_h`) — **compute dominates flight by ~40×**. The author **confirms `e_c` is intentional (not an erratum)**. *Consequence:* the original flight-only `S_energy` normalizer mis-scaled `J̃_energy` by ~40× (it would read ~40 while other normalized terms are O(1)). *(computation.py / §4.5 / §5.3)*
+26. **CORRECTION — 2026-06-23 (`S_energy`, correctness not tuning, §18):** §5.3 `S_energy` changed from flight-only `M·P_flight·Δt·T_h` to **total expected energy** `N̂_task·W̄·e_c + M·P_flight·Δt·T_h ≈ 2.03×10⁷ J (≈20.3 MJ)`, so `J̃_energy` is O(1) like the other normalized terms. **Reason:** a normalizer must match the magnitude of the quantity it normalizes — *independent of any target result* (the fix is identical whatever number the paper reported). Follows directly from entry 25. *(§5.3 / §18)*
+27. **PREDICTION — 2026-06-23 (before the objective/optimizer runs):** because compute energy dominates, `J_energy` is now **primarily a measure of compute volume**, which is in **direct tension with `J̃_completion`** (completing more tasks necessarily costs more compute energy). The **`J̃_energy` vs `J̃_completion` weight balance (`w2` vs `w3`) is therefore expected to be highly influential** on the trade-off the system finds. To be **explored via the planned §5.4 weight-sweep**, reported as a Pareto curve — **NOT** resolved by tuning toward any paper metric (§18). Logged so the expectation predates the sweep. *(§5.4 / §18 / objective.py-to-come)*
 
 ---
 

@@ -131,6 +131,10 @@ objective:
   w5_util: 1.0               # approved [B14]: weight of J_util
   w6_coverage: 1.0           # approved [B14]: weight of J_coverage
   normalization: fixed_reference_scales   # approved [B13]: J̃_m = J_m / S_m, scales computed once from config (§5.3)
+  # S_energy CORRECTION (§15 entry 26): use TOTAL expected energy, not flight-only.
+  #   S_energy = N_task_hat*Wbar*e_c + M*P_flight*dt*T_h  (compute + flight) ≈ 2.03e7 J.
+  #   Rationale: compute energy dominates flight ~40x (§15 entry 25); a flight-only
+  #   normalizer mis-scales J_energy by ~40x. Implementer MUST compute S_energy this way.
   coverage_radius_sigma_m: 100            # approved [B10]: σ_cov for Gaussian coverage D(p) (§5.2)
   coverage_demand_weight: 1.0             # approved [B11]: ω_ij = 1.0 ∀i,j (uniform demand)
   coverage_rate_threshold_rmin_bps: 1.0e+6 # approved [B10-rel]: R_min = 1 Mb/s (eval-side rate-coverage metric only)
