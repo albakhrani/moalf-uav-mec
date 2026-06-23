@@ -184,6 +184,7 @@ class Simulation:
         self.metrics = {
             "arrived": 0, "completed": 0, "on_time": 0, "latency_sum": 0.0,
             "energy_consumed_j": 0.0, "util_sum": 0.0, "coverage_sum": 0.0, "slots": 0,
+            "path_len_m": 0.0,
         }
 
     def metrics_summary(self) -> dict:
@@ -301,6 +302,8 @@ class Simulation:
                 gains = [float(self.channel.large_scale_gain(s.uav_pos[j], s.device_pos[i]))
                          for j in range(self.M)]
                 base[i] = int(np.argmax(gains))
+            elif self.offload_policy == "random":   # baseline (for §18.4 comparison)
+                base[i] = int(self.rng.integers(self.M))
             else:  # "morl": DQN greedy (trained in-loop by train_step, Increment 2)
                 base[i] = self.morl.greedy(self._offload_state(i, head))
         if self.lyapunov_biasing and devices:
@@ -367,8 +370,10 @@ class Simulation:
                     self.proj_mpc, self._mpc_evaluate_positions, j, s.uav_pos)
         moved = np.zeros(self.M, dtype=bool)
         for j in range(self.M):
+            step_disp = float(np.linalg.norm(self._last_v[j])) * self.dt
+            self.metrics["path_len_m"] += step_disp           # total UAV travel (route length)
             s.uav_pos[j] = s.uav_pos[j] + self._last_v[j] * self.dt
-            moved[j] = bool(np.linalg.norm(self._last_v[j]) > 0.0)
+            moved[j] = bool(step_disp > 0.0)
 
         # (Lyapunov stability diagnostics are computed after the env update; the
         #  drift-plus-penalty *biasing* of the assignment was applied in step 2/5.
