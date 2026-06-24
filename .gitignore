@@ -35,7 +35,9 @@ Thumbs.db
 .vscode/
 
 # ---- Project-specific ----
-# Ignore generated results, but keep the figures directory (and its tracked files).
+# Ignore generated results, but keep the figures directory and the committed
+# comparison table (the §18.4 deliverable; regenerable via experiments/reproduce_table.py).
 results/*
 !results/figures/
 !results/figures/**
+!results/comparison_table.md

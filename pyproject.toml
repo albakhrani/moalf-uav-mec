@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moalf"
-version = "0.0.0"
-description = "Reference simulation for the MOALF-UAV-MEC paper (IEEE IoT Journal, 2025)"
+version = "1.0.0"
+description = "Reference reimplementation and reproduction analysis of the MOALF-UAV-MEC paper (IEEE IoT Journal, 2025)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -13,17 +13,15 @@ authors = [
     { name = "Ali A. Al-Bakhrani" },
 ]
 keywords = ["UAV", "MEC", "edge-computing", "multiobjective-optimization", "IoT", "reinforcement-learning"]
-# TODO: pin versions before any published/reproducible run.
 dependencies = [
-    "numpy",
-    "scipy",
-    "pyyaml",
-    "matplotlib",
+    "numpy==1.26.3",
+    "pyyaml==6.0.3",
+    "torch==2.0.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
+    "pytest==8.4.2",
 ]
 
 [tool.pytest.ini_options]
