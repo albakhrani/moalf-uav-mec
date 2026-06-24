@@ -82,22 +82,9 @@ throughput advantage **does** appear under genuine load (a labelled high-load ru
 shows ~+17% over a random baseline). Full per-metric analysis and the high-load
 context block are in [`results/comparison_table.md`](results/comparison_table.md).
 
-## Relationship to the published paper
 
-This is a **consistent reimplementation and analysis**, not the original code. The
-published description contains internal inconsistencies and under-specified
-quantities; making it a single runnable system required documented modeling
-decisions — consolidating the several per-component weightings into **one coherent
-objective**, defining an explicit **two-tier queue model** for the Lyapunov layer,
-correcting a degenerate coverage term, and fixing values the paper leaves open on
-physical grounds. These choices, and the reproduction findings above, are recorded
-in detail in [CHANGES.md](CHANGES.md). The aim is a faithful, transparent basis for
-reuse and for an honest revision of the manuscript.
 
-## Citation
-
-If you use this software, please cite both the software and the original paper;
-see [CITATION.cff](CITATION.cff).
+.
 
 ## License
 
