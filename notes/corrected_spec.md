@@ -1,6 +1,6 @@
 # corrected_spec.md — Authoritative Specification for MOALF-UAV-MEC
 
-**Status:** authoritative source of truth for this repository .
+**Status:** authoritative source of truth for this repository.
 Implement *this file*, not the raw paper. Where this spec and the paper disagree, this spec wins.
 
 **Derived from:** the paper "MOALF-UAV-MEC" (IEEE IoT Journal 12(12), 2025), via an
@@ -570,7 +570,7 @@ One line each: **paper said → we chose → why.**
 **Binding rules for this repository.** This section governs how reproduction is
 judged and how parameters/choices may be set. It is not advisory: a result that
 violates the Anti-Tuning Protocol is invalid regardless of how well it matches
-the paper. the project rules "Verification stance" points here as the controlling
+the paper. The project's verification stance points here as the controlling
 protocol for every session.
 
 ### 18.1 Goal
@@ -643,7 +643,7 @@ columns:
   claimed column.
 
 ### 18.5 What this section supersedes / relates to
-- Operationalizes corrected_spec.md "Verification stance" (honest reporting, no tuning).
+- Operationalizes the project's verification stance (honest reporting, no tuning).
 - Uses the §16 sign-off list as the freeze manifest and the §15 changelog as the
   post-hoc-change log.
 - Tier-3 honesty is the same stance taken for the Lyapunov proof (§10.2): claim

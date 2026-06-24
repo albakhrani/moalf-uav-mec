@@ -1,6 +1,6 @@
 # §16 Sign-Off Worksheet — MOALF-UAV-MEC
 
-**Purpose:** clear the [§16 sign-off gate](corrected_spec.md#16-consolidated-sign-off-checklist) in `corrected_spec.md`. Per the project rules, **no implementation code is written until every item below carries an `AUTHOR DECISION:`**. This worksheet does not change the spec; it mirrors §16 so you can decide each item in one place. When you've filled the decision lines, I'll fold approved values into `config/default.yaml`, log any changes in the §15 changelog, and only then begin coding (system_model first).
+**Purpose:** clear the [§16 sign-off gate](corrected_spec.md#16-consolidated-sign-off-checklist) in `corrected_spec.md`. Per the project's working rules, **no implementation code is written until every item below carries an `AUTHOR DECISION:`**. This worksheet does not change the spec; it mirrors §16 so you can decide each item in one place. When you've filled the decision lines, I'll fold approved values into `config/default.yaml`, log any changes in the §15 changelog, and only then begin coding (system_model first).
 
 **How to use:** fill the `AUTHOR DECISION:` line under each item. "OK" / "approve" accepts the proposed value. Anything else is treated as a change and gets a §15 changelog entry. Per §18.3, a value may never be set to hit a target number.
 
