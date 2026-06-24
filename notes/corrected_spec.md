@@ -3,9 +3,9 @@
 **Status:** authoritative source of truth for this repository .
 Implement *this file*, not the raw paper. Where this spec and the paper disagree, this spec wins.
 
-**Derived from:** the paper "MOALF-UAV-MEC" (IEEE IoT Journal 12(12), 2025), as extracted in
-[`method_extraction.md`](method_extraction.md) (eqs 1–34) and [`results_extraction.md`](results_extraction.md) (eqs 35–70),
-resolved by five author decisions (D1–D5, recorded in §1).
+**Derived from:** the paper "MOALF-UAV-MEC" (IEEE IoT Journal 12(12), 2025), via an
+equation-by-equation extraction (eqs 1–34 from the system model and 35–70 from the
+results), resolved by five author decisions (D1–D5, recorded in §1).
 
 **How to read this file**
 - 🔲 **SIGN-OFF** = a value or modeling choice proposed here but that needs the author's explicit approval. All are also listed together in [§16](#16-consolidated-sign-off-checklist). Nothing marked SIGN-OFF is settled.
@@ -52,7 +52,7 @@ resolved by five author decisions (D1–D5, recorded in §1).
 
 ## 3. Symbol table — one meaning per symbol
 
-The paper overloaded several letters (documented in `results_extraction.md` §4 C6). Here each symbol has **exactly one** meaning; secondary uses are **renamed** and the rename is recorded. Renamed symbols are used everywhere below.
+The paper overloaded several letters (noted during the equation extraction). Here each symbol has **exactly one** meaning; secondary uses are **renamed** and the rename is recorded. Renamed symbols are used everywhere below.
 
 | Canonical symbol | Single meaning | Unit | Was also used in paper for → renamed to |
 |---|---|---|---|
@@ -81,7 +81,7 @@ The paper overloaded several letters (documented in `results_extraction.md` §4 
 | `E_j(t)` | UAV j stored energy | J | — |
 | `n_ep` | MORL training episodes | – | — |
 
-> Any symbol not in this table keeps its `method_extraction.md` meaning. A coder must not introduce a new meaning for a listed symbol.
+> Any symbol not in this table keeps its original meaning from the paper. A coder must not introduce a new meaning for a listed symbol.
 
 ---
 
@@ -163,7 +163,7 @@ Q^c_j(t+1) = max{ Q^c_j(t) − S^c_j(t), 0 } + A^c_j(t)
 - Initial conditions: `Q^r_i(0) = 0` ∀i, `Q^c_j(0) = 0` ∀j (§14, B25).
 - Units differ by tier (bits in Tier 1, cycles in Tier 2). The **only** bits→cycles conversion of actual work happens at the hand-off, per task, via `r_{i,k}`. §10 separately introduces a scalar `c_Q` to put bits² and cycles² on one scale *inside the Lyapunov function* — that is a unit-balancing constant for the stability metric, **not** a work conversion.
 - `Q^r_i` and `Q^c_j` are **the** queues referenced everywhere; the single symbol `Q_i` from the symbol table (§3) now denotes the radio tier `Q^r_i`, and `Q^c_j` is added for the compute tier.
-- supersedes: the implicit single queue behind (32),(33); fills the gap noted in `method_extraction.md` §6 #25. Logged in §15 (entry 16).
+- supersedes: the implicit single queue behind (32),(33); fills the gap left by the paper (which never specifies the queue dynamics). Logged in §15 (entry 16).
 
 ---
 
@@ -332,7 +332,7 @@ The Lyapunov layer now governs the **two-tier** backlog of §4.7 (A1). Let the j
 ### 10.2 Secondary track — two-tier drift-bound derivation (TODO, NOT a proof yet)
 > **This subsection is a placeholder. No bound is claimed.** The two-tier model makes the derivation strictly harder than the single-queue case because the tiers are coupled. To close it one must: (a) bound
 > `Δ(t) ≤ B + Σ_i Q^r_i(t)·E[A^r_i − S^r_i | Θ] + c_Q·Σ_j Q^c_j(t)·E[A^c_j − S^c_j | Θ]`
-> with an explicit constant `B`, where the **cross-terms** arise because `A^c_j = Σ_i x_ij Σ_k r_{i,k}·b_{i,k}` (the per-task hand-off, §4.7) is itself a function of the Tier-1 service (handed-off bits ≤ `S^r_i`); (b) show the §10.1 controller minimizes the RHS jointly over both tiers; (c) derive the `[O(1/V) optimality gap, O(V) backlog]` tradeoff for the **joint** backlog. The coupling means the per-tier rate-stability conditions are **not separable** and `B` must absorb the hand-off cross-terms. The derivation must also carry the §10.3 service discipline as a constraint on the achievable compute-arrival process. Until (a)–(c) are written and checked, **the repo claims empirical stability only.** Tracking: `method_extraction.md` §6 #26.
+> with an explicit constant `B`, where the **cross-terms** arise because `A^c_j = Σ_i x_ij Σ_k r_{i,k}·b_{i,k}` (the per-task hand-off, §4.7) is itself a function of the Tier-1 service (handed-off bits ≤ `S^r_i`); (b) show the §10.1 controller minimizes the RHS jointly over both tiers; (c) derive the `[O(1/V) optimality gap, O(V) backlog]` tradeoff for the **joint** backlog. The coupling means the per-tier rate-stability conditions are **not separable** and `B` must absorb the hand-off cross-terms. The derivation must also carry the §10.3 service discipline as a constraint on the achievable compute-arrival process. Until (a)–(c) are written and checked, **the repo claims empirical stability only.** (The paper specifies no such drift bound; this remains an open derivation.)
 
 ### 10.3 Service discipline ↔ drift interaction (priority-by-urgency; no stability conflict)
 The radio-queue discipline is **priority-by-urgency** (§4.7: highest `U_{i,k}` first). Its interaction with the two-tier drift was checked explicitly (it does **not** conflict with §10.1):

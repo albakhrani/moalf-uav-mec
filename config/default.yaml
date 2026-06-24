@@ -14,7 +14,7 @@
 #   {dist: uniform_int, low: a, high: b}      -> integer Uniform{a..b} inclusive
 #
 # Status: §16 SIGNED OFF (2026-06-23). Migration dropped (A4); two-tier queue (A1).
-# Cross-references: corrected_spec.md (authoritative), method/results_extraction.md.
+# Cross-references: corrected_spec.md (authoritative spec).
 # =============================================================================
 
 # ---- global run control -----------------------------------------------------
