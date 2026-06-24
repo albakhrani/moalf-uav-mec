@@ -8,10 +8,8 @@ required resolving them. Each decision below is an engineering/modeling choice
 made for consistency and reproducibility, not a change to the paper's intent.
 
 The authoritative specification this code implements is
-[`notes/corrected_spec.md`](notes/corrected_spec.md); the equation-level extraction
-of the paper is in [`notes/method_extraction.md`](notes/method_extraction.md) and
-[`notes/results_extraction.md`](notes/results_extraction.md). Section references
-below (e.g. §5, eq 14) point into the spec.
+[`notes/corrected_spec.md`](notes/corrected_spec.md). Section references below
+(e.g. §5, eq 14) point into the spec.
 
 ---
 

@@ -26,7 +26,7 @@ moalf-uav-mec/
 ├── experiments/                 # reproduction + diagnostic runners
 ├── tests/                       # pytest suite (system model, optimizers, conservation)
 ├── results/comparison_table.md  # generated §18.4 paper-comparison table
-└── notes/                       # equation extraction + authoritative corrected spec
+└── notes/                       # authoritative corrected spec + sign-off worksheet
 ```
 
 The authoritative behavior spec is `notes/corrected_spec.md`; deviations from the
