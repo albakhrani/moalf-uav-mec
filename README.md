@@ -29,8 +29,7 @@ moalf-uav-mec/
 └── notes/                       # authoritative corrected spec + sign-off worksheet
 ```
 
-The authoritative behavior spec is `notes/corrected_spec.md`; deviations from the
-published paper are summarized in [CHANGES.md](CHANGES.md).
+
 
 ## Installation
 
