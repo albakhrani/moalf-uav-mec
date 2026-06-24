@@ -96,9 +96,6 @@ Run an experiment (scripts read `config/default.yaml`):
 PYTHONPATH=src python experiments/<script>.py
 ```
 
-## Citation
-
-If you use this software, see [CITATION.cff](CITATION.cff) for citation metadata.
 
 ## License
 
