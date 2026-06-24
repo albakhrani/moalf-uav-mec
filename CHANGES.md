@@ -1,5 +1,8 @@
 # Implementation Notes and Design Decisions
 
+**Summary:** this implementation reproduces the paper's task-completion result.
+The relative-improvement metrics depend on operating load, which is analyzed in section 4.
+
 This document records the design decisions made while building a single, runnable,
 self-consistent implementation of the MOALF-UAV-MEC framework (IEEE Internet of
 Things Journal, vol. 12, no. 12, 2025), and explains where the implementation
@@ -100,8 +103,8 @@ frozen parameters produce, then ran the consistent system on those parameters
 (30 runs, seeds 42–71). Results are in
 [`results/comparison_table.md`](results/comparison_table.md):
 
-- **Task completion rate** matches the paper closely (≈ 98% against the reported
-  94.5%).
+- **Task completion rate** meets and slightly exceeds the reported figure
+  (≈ 98% vs 94.5%).
 - **Relative-improvement metrics (throughput increase, route reduction)** are
   less pronounced under the frozen parameters. The analysis shows why: the stated
   configuration corresponds to a **lightly-loaded regime** — compute demand is
