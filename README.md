@@ -1,35 +1,76 @@
-# MOALF-UAV-MEC: Reimplementation and Reproduction Analysis
+# MOALF-UAV-MEC Simulation
 
-A from-scratch, test-verified reimplementation of the **MOALF-UAV-MEC** framework —
-adaptive multiobjective optimization for UAV-assisted mobile edge computing —
-combining **multiobjective reinforcement learning (MORL)**, **model predictive
-control (MPC)**, **adaptive particle swarm optimization (APSO)**, and **Lyapunov
-drift-plus-penalty** control over a **two-tier (radio + compute) queue model**.
-It is built for reproducibility and analysis: a single internally-consistent
-specification, one coherent objective shared by all optimizers, exact end-to-end
-conservation of the bits→cycles task pipeline, and an honest reproduction of the
-published paper's headline results. The reference paper is A. A. Al-Bakhrani, M.
-Li, M. S. Obaidat, and G. A. Ameran, *"MOALF-UAV-MEC: Adaptive Multiobjective
-Optimization for UAV-Assisted Mobile Edge Computing in Dynamic IoT Environments,"*
-IEEE Internet of Things Journal, vol. 12, no. 12, pp. 20736–20756, 2025.
+A simulation of the **MOALF-UAV-MEC** framework for UAV-assisted mobile edge
+computing. Multiple IoT devices generate computational tasks that are offloaded
+to a fleet of UAVs acting as edge servers. The framework coordinates four
+controllers over a discrete-time simulation: **multiobjective reinforcement
+learning (MORL)** decides task-offload assignments, **model predictive control
+(MPC)** plans UAV trajectories, **adaptive particle swarm optimization (APSO)**
+allocates each UAV's compute capacity across its tasks, and a **Lyapunov
+drift-plus-penalty** layer keeps the system's queues stable. Tasks flow through a
+**two-tier queue model** — a per-device radio (transmission) backlog and a
+per-UAV compute backlog — so the bits→cycles pipeline is modelled and conserved
+end to end.
+
+## Architecture
+
+The system is organized around a single shared objective, a deterministic
+system-model layer, four optimizers, and a per-slot simulation loop.
+
+**Single objective with per-optimizer projections.** There is exactly one
+objective function (a normalized, weighted sum of task latency, energy,
+completion, utilization, and coverage terms), and the objective weights live in
+exactly one place. Each optimizer scores candidate decisions through a *named
+projection* of that objective — the subset of terms its decision variables affect
+— that carries the same weights and normalizations:
+
+- `morl` → {task, energy, completion, utilization}
+- `mpc`  → {task, energy, coverage}
+- `apso` → {task, energy, utilization}
+
+A projection holds no weights of its own; it computes scores from the parent
+objective. By construction no optimizer can introduce a second weighting scheme,
+so the whole system optimizes one coherent objective.
+
+**System-model layer** (`src/moalf/system_model/`) provides the deterministic
+physics, each reading its parameters from configuration:
+
+- `channel` — log-distance + Rician channel gain and Shannon achievable rate.
+- `computation` — task execution time and energy.
+- `energy` — UAV battery dynamics (consumption, harvesting, capacity cap).
+- `coverage` — smooth Gaussian coverage metric used by the trajectory objective.
+
+**Optimizers** (`src/moalf/optimizers/`):
+
+- `morl` — a DQN agent that chooses offload assignments and is trained in-loop.
+- `mpc` — a direct receding-horizon controller that plans 2-D UAV motion at fixed
+  altitude.
+- `apso` — particle-swarm allocation of each UAV's compute capacity across its
+  tasks.
+- `lyapunov` — a two-tier drift-plus-penalty controller that biases assignment to
+  keep both queue tiers bounded.
+
+**Simulation loop** (`src/moalf/simulation.py`) ties these together. Each time
+slot, in order: observe state → MORL assigns offloads → MPC moves UAVs → APSO
+allocates compute → the Lyapunov layer adjusts for stability → the environment
+advances (task arrivals, radio transmission, the per-task bits→cycles hand-off
+into the compute tier, compute execution, energy, and coverage). The two queue
+tiers are updated with exact conservation of the work passing through them.
 
 ## Repository layout
 
 ```
 moalf-uav-mec/
-├── config/default.yaml          # all parameters (paper-stated or documented choices)
+├── config/default.yaml          # all parameters (single source for the run)
 ├── src/moalf/
-│   ├── system_model/            # channel, computation, energy, coverage models
-│   ├── optimizers/              # morl (DQN), mpc, apso, lyapunov
-│   ├── objective.py             # the single objective; optimizers consume projections
-│   └── simulation.py            # Algorithm-1 per-slot loop (two-tier queues)
-├── experiments/                 # reproduction + diagnostic runners
-├── tests/                       # pytest suite (system model, optimizers, conservation)
-├── results/comparison_table.md  # generated §18.4 paper-comparison table
-└── notes/                       # authoritative corrected spec + sign-off worksheet
+│   ├── system_model/            # channel, computation, energy, coverage
+│   ├── optimizers/              # morl, mpc, apso, lyapunov
+│   ├── objective.py             # the single objective; optimizers use projections
+│   └── simulation.py            # per-slot simulation loop (two-tier queues)
+├── experiments/                 # runnable experiment scripts
+├── tests/                       # pytest suite
+└── notes/                       # specification and design notes
 ```
-
-
 
 ## Installation
 
@@ -39,51 +80,25 @@ Requires **Python 3.9+**.
 pip install -r requirements.txt
 ```
 
-Dependencies are pinned (numpy, pyyaml, torch, pytest). Training runs on CPU and
-is seeded; exact bit-reproducibility of the MORL results also requires matching
-the pinned PyTorch build.
+Dependencies are pinned (numpy, pyyaml, torch, pytest).
 
-## Reproducing the results
+## Running
 
-Regenerate the paper-comparison table (frozen config, 30-run protocol):
-
-```bash
-PYTHONPATH=src python experiments/reproduce_table.py
-```
-
-This writes/prints the §18.4 comparison (also saved in
-[`results/comparison_table.md`](results/comparison_table.md)). Run the test suite
-with:
+Run the test suite:
 
 ```bash
 pytest
 ```
 
-## Results
+Run an experiment (scripts read `config/default.yaml`):
 
-On the paper's frozen configuration (30 runs, seeds 42–71), comparing the
-consistent reimplementation against the published headline metrics:
+```bash
+PYTHONPATH=src python experiments/<script>.py
+```
 
-| metric | paper-claimed | reproduced (mean ± sd) | tier |
-|---|---|---|---|
-| Task completion rate | 94.5% | **98.4% ± 0.5** | 1 — reproduced (exceeds) |
-| Throughput increase vs baseline | +55% | +0.6% ± 5.3 | 3 — regime-dependent |
-| UAV route reduction | −38% | −11.9% ± 15.3 | 3 — regime-dependent |
+## Citation
 
-**Task completion reproduces and slightly exceeds the published value.** The
-throughput and route-reduction figures do **not** reproduce at the stated
-parameters — not as a bare miss, but because the published configuration is a
-**lightly-loaded, saturated-SNR regime**: compute demand is ~⅓ of capacity, queues
-are empty ~99% of the time, and per-link SNR is saturated cell-wide. In that
-regime baselines already run near ceiling (little throughput to gain) and UAV
-position has weak leverage (routes are not minimized). The learned policy's
-throughput advantage **does** appear under genuine load (a labelled high-load run
-shows ~+17% over a random baseline). Full per-metric analysis and the high-load
-context block are in [`results/comparison_table.md`](results/comparison_table.md).
-
-
-
-.
+If you use this software, see [CITATION.cff](CITATION.cff) for citation metadata.
 
 ## License
 
